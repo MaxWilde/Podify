@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useState } from "react";
 import { useMountpointStore } from "../store/mountpoint";
 import { useToastStore, toastErrorMessage } from "../store/toast";
+import { useUiStore } from "../store/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { getLibrary } from "../api/library";
 import { LIBRARY_QUERY_KEY } from "../hooks/useLibrary";
@@ -16,6 +17,8 @@ export function Sidebar() {
   const setMountpoint = useMountpointStore((s) => s.setMountpoint);
   const setConnected = useMountpointStore((s) => s.setConnected);
   const push = useToastStore((s) => s.push);
+  const sidebarOpen = useUiStore((s) => s.sidebarOpen);
+  const closeDrawers = useUiStore((s) => s.closeDrawers);
   const queryClient = useQueryClient();
   const [connecting, setConnecting] = useState(false);
 
@@ -34,8 +37,21 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-full w-60 shrink-0 flex-col gap-4 bg-sidebar p-4">
-      <div className="px-1 text-xl font-bold tracking-tight text-text">Podify</div>
+    <aside
+      className={`fixed inset-y-0 left-0 z-40 flex w-60 shrink-0 flex-col gap-4 overflow-y-auto bg-sidebar p-4 transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
+        sidebarOpen ? "translate-x-0" : "-translate-x-full"
+      }`}
+    >
+      <div className="flex items-center justify-between px-1">
+        <span className="text-xl font-bold tracking-tight text-text">Podify</span>
+        <button
+          onClick={closeDrawers}
+          className="rounded p-1 text-2xl leading-none text-text-secondary hover:text-text md:hidden"
+          aria-label="Close menu"
+        >
+          ×
+        </button>
+      </div>
 
       <div className="flex flex-col gap-2">
         <label className="px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
@@ -56,7 +72,7 @@ export function Sidebar() {
         </button>
       </div>
 
-      <nav className="flex flex-col gap-1">
+      <nav className="flex flex-col gap-1" onClick={closeDrawers}>
         <div className="px-1 pt-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
           Library
         </div>

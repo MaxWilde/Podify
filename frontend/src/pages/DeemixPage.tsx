@@ -233,10 +233,10 @@ export function DeemixPage() {
             ← Back
           </button>
         )}
-        <h1 className="truncate text-2xl font-bold">
+        <h1 className="min-w-0 flex-1 truncate text-2xl font-bold">
           {view.kind === "artist" ? view.name : view.kind === "album" ? view.title : "Deemix"}
         </h1>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <select
             value={quality}
             onChange={(e) => setQuality(e.target.value as DeemixQuality)}

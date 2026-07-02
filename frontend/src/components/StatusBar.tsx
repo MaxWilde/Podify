@@ -56,14 +56,14 @@ export function StatusBar() {
   }
 
   return (
-    <footer className="flex h-8 shrink-0 items-center gap-2 border-t border-border bg-sidebar px-4 text-xs text-text-secondary">
-      <div className="flex flex-1 items-center gap-2">
-        <span className={`h-2 w-2 rounded-full ${dotClass}`} />
-        <span>{statusText}</span>
+    <footer className="flex h-8 shrink-0 items-center gap-2 border-t border-border bg-sidebar px-3 text-xs text-text-secondary sm:px-4">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`} />
+        <span className="truncate">{statusText}</span>
       </div>
-      <div className="flex flex-1 justify-center">{connectedMountpoint && <StorageBar />}</div>
-      <div className="flex flex-1 justify-end">
-        {connectedMountpoint && <span>{connectedMountpoint}</span>}
+      <div className="hidden flex-1 justify-center md:flex">{connectedMountpoint && <StorageBar />}</div>
+      <div className="hidden flex-1 justify-end sm:flex">
+        {connectedMountpoint && <span className="truncate">{connectedMountpoint}</span>}
       </div>
     </footer>
   );

@@ -25,16 +25,16 @@ function AlbumDetail({ group, mountpoint, onBack }: { group: AlbumGroup; mountpo
       <button onClick={onBack} className="mb-4 text-sm text-text-secondary hover:text-text">
         ← Back to Albums
       </button>
-      <div className="mb-6 flex items-end gap-4">
+      <div className="mb-6 flex flex-wrap items-end gap-4">
         <Cover
           mountpoint={mountpoint}
           ipodPath={group.coverTrack?.ipod_path}
           alt={group.album}
-          className="h-40 w-40 rounded shadow-lg text-5xl"
+          className="h-28 w-28 rounded text-5xl shadow-lg sm:h-40 sm:w-40"
         />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="text-xs uppercase tracking-wide text-text-secondary">Album</div>
-          <h1 className="text-3xl font-bold">{group.album}</h1>
+          <h1 className="text-2xl font-bold sm:text-3xl">{group.album}</h1>
           <div className="mt-1 text-text-secondary">
             {group.artist} · {group.tracks.length} tracks
           </div>
@@ -42,7 +42,7 @@ function AlbumDetail({ group, mountpoint, onBack }: { group: AlbumGroup; mountpo
         <button
           onClick={deleteAlbum}
           disabled={deleteMutation.isPending}
-          className="ml-auto shrink-0 rounded bg-red-600/80 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+          className="shrink-0 rounded bg-red-600/80 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
         >
           {deleteMutation.isPending ? "Deleting..." : "Delete album"}
         </button>

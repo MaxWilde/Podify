@@ -58,30 +58,32 @@ function PlaylistDetail({
       {tracks.length === 0 ? (
         <div className="pt-12 text-center text-text-secondary">This playlist is empty.</div>
       ) : (
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-secondary">
-              <th className="w-8 py-2" />
-              <th className="py-2 pr-4">Title</th>
-              <th className="py-2 pr-4">Artist</th>
-              <th className="py-2 pr-4">Album</th>
-              <th className="py-2 pr-4">Duration</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tracks.map((track) => (
-              <tr key={track.id} className="border-b border-border/50 hover:bg-surface">
-                <td className="py-2">
-                  <input type="checkbox" checked={selected.has(track.id)} onChange={() => toggleOne(track.id)} />
-                </td>
-                <td className="py-2 pr-4 text-text">{track.title}</td>
-                <td className="py-2 pr-4 text-text-secondary">{track.artist}</td>
-                <td className="py-2 pr-4 text-text-secondary">{track.album}</td>
-                <td className="py-2 pr-4 text-text-secondary">{formatDuration(track.duration_seconds)}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[480px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-secondary">
+                <th className="w-8 py-2" />
+                <th className="py-2 pr-4">Title</th>
+                <th className="py-2 pr-4">Artist</th>
+                <th className="hidden py-2 pr-4 sm:table-cell">Album</th>
+                <th className="py-2 pr-4">Duration</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {tracks.map((track) => (
+                <tr key={track.id} className="border-b border-border/50 hover:bg-surface">
+                  <td className="py-2">
+                    <input type="checkbox" checked={selected.has(track.id)} onChange={() => toggleOne(track.id)} />
+                  </td>
+                  <td className="py-2 pr-4 text-text">{track.title}</td>
+                  <td className="py-2 pr-4 text-text-secondary">{track.artist}</td>
+                  <td className="hidden py-2 pr-4 text-text-secondary sm:table-cell">{track.album}</td>
+                  <td className="py-2 pr-4 text-text-secondary">{formatDuration(track.duration_seconds)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -122,14 +124,14 @@ export function PlaylistsPage() {
 
   return (
     <ConnectGate>
-      <div className="flex items-center gap-2 py-4">
+      <div className="flex flex-wrap items-center gap-2 py-4">
         <h1 className="text-2xl font-bold">Playlists</h1>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex flex-1 gap-2 sm:flex-none">
           <input
             value={newPlaylistName}
             onChange={(e) => setNewPlaylistName(e.target.value)}
             placeholder="New playlist name"
-            className="rounded bg-surface px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-accent"
+            className="min-w-0 flex-1 rounded bg-surface px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-accent sm:flex-none"
           />
           <button
             onClick={() => {

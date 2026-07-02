@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getDeemixDownloads } from "../api/deemix";
 import { useInvalidateLibrary } from "../hooks/useLibraryMutations";
 import { useToastStore } from "../store/toast";
+import { useUiStore } from "../store/ui";
 import type { DeemixJob, DeemixJobItem } from "../types";
 
 const ITEM_STATUS_LABEL: Record<DeemixJobItem["status"], string> = {
@@ -64,6 +65,8 @@ function JobCard({ job }: { job: DeemixJob }) {
 export function DownloadsPanel() {
   const push = useToastStore((s) => s.push);
   const invalidateLibrary = useInvalidateLibrary();
+  const downloadsOpen = useUiStore((s) => s.downloadsOpen);
+  const closeDrawers = useUiStore((s) => s.closeDrawers);
   const seenStatuses = useRef<Map<string, string>>(new Map());
 
   const jobsQuery = useQuery({
@@ -95,10 +98,21 @@ export function DownloadsPanel() {
   );
 
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col gap-3 overflow-y-auto border-l border-border bg-sidebar p-4">
+    <aside
+      className={`fixed inset-y-0 right-0 z-40 flex w-72 max-w-[85vw] shrink-0 flex-col gap-3 overflow-y-auto border-l border-border bg-sidebar p-4 transition-transform duration-200 md:static md:z-auto md:max-w-none md:translate-x-0 ${
+        downloadsOpen ? "translate-x-0" : "translate-x-full"
+      }`}
+    >
       <div className="flex items-center gap-2 px-1">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-text-secondary">Downloads</h2>
         {hasActive && <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />}
+        <button
+          onClick={closeDrawers}
+          className="ml-auto rounded p-1 text-2xl leading-none text-text-secondary hover:text-text md:hidden"
+          aria-label="Close downloads"
+        >
+          ×
+        </button>
       </div>
       {jobs.length === 0 ? (
         <p className="px-1 text-sm text-text-secondary">No downloads yet.</p>
