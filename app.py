@@ -4,10 +4,12 @@ from io import BytesIO
 import os
 import tempfile
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, request, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 
 from album_art import CoverArtError, load_cover
+from auto_sync import run_auto_sync_if_enabled
+from deemix_routes import deemix_bp
 from ipod_service import (
     GpodError,
     add_tracks,
@@ -17,17 +19,20 @@ from ipod_service import (
     delete_tracks,
     load_library,
     remove_tracks_from_playlist,
+    resolve_ipod_root,
 )
-from settings_service import changed_audio_files
 from settings_service import load_settings
-from settings_service import load_sync_state
 from settings_service import save_settings
-from settings_service import save_sync_state
-from settings_service import scan_audio_files
 
 
 app = Flask(__name__)
+app.register_blueprint(deemix_bp)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 2GB
+
+if os.environ.get("DEBUG", "").strip().lower() in {"1", "true", "yes"}:
+    from flask_cors import CORS
+
+    CORS(app, resources={r"/api/*": {"origins": "*"}})
 ALLOWED_UPLOAD_EXTENSIONS = {
     ".mp3",
     ".m4a",
@@ -52,80 +57,13 @@ def _is_supported_upload(filename: str, mimetype: str) -> bool:
     return True
 
 
-def _run_auto_sync_if_enabled(mountpoint: str) -> dict[str, object]:
-    settings = load_settings()
-    if not bool(settings.get("auto_sync_enabled", False)):
-        return {"status": "disabled"}
-
-    music_directory = str(settings.get("music_directory", "") or "").strip()
-    if not music_directory:
-        return {"status": "skipped", "message": "Auto-sync enabled but Music Directory is empty."}
-    if not os.path.isdir(music_directory):
-        return {"status": "skipped", "message": f"Music Directory not found: {music_directory}"}
-
-    previous_state = load_sync_state()
-    _, current_index = scan_audio_files(music_directory)
-    if not current_index:
-        save_sync_state({"files": {}})
-        return {"status": "noop", "message": "Auto-sync: no FLAC files found in Music Directory."}
-
-    to_sync = changed_audio_files(previous_state, current_index)
-    if not to_sync:
-        save_sync_state({"files": current_index})
-        return {"status": "noop", "message": "Auto-sync: no new or changed FLAC files in Music Directory."}
-
-    result = add_tracks(
-        mountpoint=mountpoint,
-        file_paths=to_sync,
-        convert_to_alac=True,
-    )
-
-    deleted_count = 0
-    if bool(settings.get("delete_after_sync", False)):
-        for path in to_sync:
-            try:
-                os.remove(path)
-                deleted_count += 1
-                current_index.pop(path, None)
-            except OSError:
-                continue
-        _remove_empty_dirs(music_directory)
-
-    save_sync_state({"files": current_index})
-
-    added_count = int(result.get("requested_count", 0))
-    message = f"Auto-sync added {added_count} file(s) from Music Directory."
-    if deleted_count:
-        message = f"{message} Deleted {deleted_count} source file(s)."
-    return {
-        "status": "synced",
-        "added_count": added_count,
-        "deleted_source_count": deleted_count,
-        "scanned_count": len(current_index),
-        "message": message,
-    }
-
-
-def _remove_empty_dirs(root: str) -> None:
-    normalized_root = os.path.abspath(root)
-    for current_root, dirs, _files in os.walk(normalized_root, topdown=False):
-        for directory in dirs:
-            path = os.path.join(current_root, directory)
-            try:
-                os.rmdir(path)
-            except OSError:
-                continue
-
-
-@app.route("/")
-def index() -> str:
-    default_mountpoint = os.environ.get("DEFAULT_MOUNTPOINT", "/ipod")
-    asset_version = os.environ.get("ASSET_VERSION", "20260227-settings")
-    return render_template(
-        "index.html",
-        default_mountpoint=default_mountpoint,
-        asset_version=asset_version,
-    )
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_react(path: str) -> object:
+    dist = os.path.join(app.root_path, "frontend", "dist")
+    if path and os.path.exists(os.path.join(dist, path)):
+        return send_from_directory(dist, path)
+    return send_from_directory(dist, "index.html")
 
 
 @app.route("/api/library")
@@ -140,7 +78,7 @@ def library() -> tuple[object, int] | object:
 
         sync_payload: dict[str, object] | None = None
         try:
-            sync_payload = _run_auto_sync_if_enabled(resolved_mountpoint)
+            sync_payload = run_auto_sync_if_enabled(resolved_mountpoint)
         except GpodError as exc:
             sync_payload = {"status": "error", "message": f"Auto-sync failed: {exc}"}
         except Exception as exc:
@@ -167,6 +105,12 @@ def cover() -> tuple[object, int] | object:
         return jsonify({"error": "Query parameter 'mountpoint' is required."}), 400
     if not ipod_path:
         return jsonify({"error": "Query parameter 'ipod_path' is required."}), 400
+
+    # Track ipod_paths are relative to the iPod root. When the database lives in
+    # a discovered sub-root of the requested mountpoint, resolve to that same
+    # root so the cover file is found — otherwise every cover 404s and the UI
+    # shows placeholders even though the artwork is present on disk.
+    mountpoint = resolve_ipod_root(mountpoint)
 
     try:
         image_bytes, mime_type = load_cover(mountpoint, ipod_path)

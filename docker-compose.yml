@@ -1,5 +1,5 @@
 services:
-  classicpod-dashboard:
+  podify:
     build: .
     ports:
       - "${HOST_IP:-0.0.0.0}:${HOST_PORT:-8080}:${APP_PORT:-8080}"
@@ -9,11 +9,15 @@ services:
       - GPOD_LS_ATTEMPT_TIMEOUT_SECONDS=8
       - APP_HOST=${APP_HOST:-0.0.0.0}
       - APP_PORT=${APP_PORT:-8080}
-      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
+      # Must stay at a single worker: deemix job state is in-process. Scale
+      # concurrency with threads instead (see Dockerfile CMD).
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-8}
       - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-180}
       - GUNICORN_GRACEFUL_TIMEOUT=${GUNICORN_GRACEFUL_TIMEOUT:-30}
       - CLASSICPOD_SETTINGS_PATH=/app/data/settings.json
       - CLASSICPOD_SYNC_STATE_PATH=/app/data/sync_state.json
+      - DEEMIX_CONFIG_PATH=/app/data/deemix_config.json
+      - DEEMIX_DOWNLOAD_SUBDIR=${DEEMIX_DOWNLOAD_SUBDIR:-deemix}
     volumes:
       - type: bind
         source: ${IPOD_MOUNTPOINT:-/media}

@@ -117,6 +117,27 @@ def _gpod_ls_candidates(requested_mountpoint: str) -> list[tuple[str, str]]:
     return candidates
 
 
+def resolve_ipod_root(mountpoint: str) -> str:
+    """Return the directory that actually holds an iTunesDB for `mountpoint`.
+
+    Reads (gpod-ls) tolerate a range of layouts via _gpod_ls_candidates:
+    direct iTunesDB file paths and iPod roots discovered a level or two below
+    the requested mountpoint. The write tools (gpod-cp / gpod-rm /
+    gpod-playlistctl) only accept a mount *directory* and call itdb_parse() on
+    it directly, so when the database lives in a discovered sub-root the raw
+    mountpoint makes them fail with "Couldn't find an iPod database". Resolve to
+    the same root the reader uses so writes target the database that reads see.
+    When the DB is already directly under `mountpoint` this returns it unchanged.
+    """
+    abs_mount = os.path.abspath(mountpoint)
+    if os.path.isdir(abs_mount) and _has_itunesdb_under_root(abs_mount):
+        return abs_mount
+    for _ls_arg, effective_mountpoint in _gpod_ls_candidates(mountpoint):
+        if os.path.isdir(effective_mountpoint) and _has_itunesdb_under_root(effective_mountpoint):
+            return effective_mountpoint
+    return abs_mount
+
+
 def _run_gpod_ls_once(mountpoint: str, timeout_seconds: int) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["gpod-ls", "-M", mountpoint],
@@ -534,6 +555,7 @@ def _normalize_track(track: dict[str, Any]) -> dict[str, Any]:
         "title": track.get("title") or "Unknown Title",
         "artist": track.get("artist") or "Unknown Artist",
         "album": track.get("album") or "Unknown Album",
+        "album_artist": track.get("albumartist") or "",
         "genre": track.get("genre") or "",
         "year": int(track.get("year") or 0),
         "playcount": int(track.get("playcount") or 0),
@@ -541,6 +563,8 @@ def _normalize_track(track: dict[str, Any]) -> dict[str, Any]:
         "size_bytes": int(track.get("size") or 0),
         "duration_seconds": round(duration_seconds, 2),
         "ipod_path": track.get("ipod_path") or "",
+        # gpod-ls (MaxWilde/gpod-utils, the build used in the container) emits
+        # this flag under the key "artwork" via itdb_track_has_thumbnails().
         "artwork": bool(track.get("artwork", False)),
         "checksum": track.get("checksum"),
     }
@@ -694,6 +718,7 @@ def _itunesdb_write_lock(mountpoint: str, timeout_seconds: int) -> Iterable[None
 
 
 def _run_gpod_cp(mountpoint: str, sources: list[str], timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+    mountpoint = resolve_ipod_root(mountpoint)
     command = ["gpod-cp", "-M", mountpoint, *sources]
     with _itunesdb_write_lock(mountpoint, timeout_seconds):
         return subprocess.run(
@@ -712,6 +737,7 @@ def _run_gpod_playlistctl(
     track_ids: list[int],
     timeout_seconds: int,
 ) -> subprocess.CompletedProcess[str]:
+    mountpoint = resolve_ipod_root(mountpoint)
     command = [
         "gpod-playlistctl",
         "-M",
@@ -770,6 +796,7 @@ def _run_gpod_playlistctl(
 
 
 def _run_gpod_rm(mountpoint: str, targets: list[str], timeout_seconds: int) -> subprocess.CompletedProcess[str]:
+    mountpoint = resolve_ipod_root(mountpoint)
     command = ["gpod-rm", "-M", mountpoint, *targets]
     try:
         with _itunesdb_write_lock(mountpoint, timeout_seconds):

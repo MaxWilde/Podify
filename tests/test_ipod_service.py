@@ -55,6 +55,7 @@ SAMPLE_JSON = """{
               "tracklen": 180000,
               "size": 123456,
               "artwork": true,
+              "albumartist": "Artist A",
               "playcount": 2,
               "bitrate": 192
             }
@@ -94,6 +95,7 @@ class LoadLibraryTests(unittest.TestCase):
         self.assertEqual(payload["album_count"], 1)
         self.assertEqual(payload["tracks"][0]["title"], "Song A")
         self.assertTrue(payload["tracks"][0]["artwork"])
+        self.assertEqual(payload["tracks"][0]["album_artist"], "Artist A")
         self.assertEqual(payload["playlists"][0]["name"], "Favorites")
         self.assertEqual(payload["playlists"][0]["track_ids"], [10])
 

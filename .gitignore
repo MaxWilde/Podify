@@ -4,3 +4,11 @@ __pycache__/
 *.pyd
 .pytest_cache/
 /data
+.env
+# Deemix config holds the Deezer ARL token — never commit it. This is the
+# default path used when DEEMIX_CONFIG_PATH is unset (local/dev runs).
+.deemix_config.json
+deemix_config.json
+.CLAUDE.md
+.dockerignore
+CLAUDE.md

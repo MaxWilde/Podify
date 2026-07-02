@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     automake \
     build-essential \
     ca-certificates \
+    curl \
     ffmpeg \
     git \
     libavcodec-dev \
@@ -27,6 +28,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
+# Node.js for building the Podify frontend
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN git clone --depth 1 https://github.com/MaxWilde/gpod-utils /tmp/gpod-utils \
     && cd /tmp/gpod-utils \
     && autoreconf --install \
@@ -41,6 +47,8 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+RUN cd frontend && npm install && npm run build
 
 RUN set -eux; \
     GPOD_PC=""; \
@@ -62,4 +70,8 @@ RUN set -eux; \
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "gunicorn --bind ${APP_HOST:-0.0.0.0}:${APP_PORT:-8080} --workers ${GUNICORN_WORKERS:-2} --timeout ${GUNICORN_TIMEOUT:-180} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} app:app"]
+# Deemix download jobs are tracked in an in-process dict (deemix_service._JOBS),
+# so the app must run as a single worker — with >1 worker, download-status polls
+# round-robin across processes and jobs appear to flicker in/out. Concurrency for
+# the rest of the UI is provided by threads instead, which share that state.
+CMD ["sh", "-c", "gunicorn --bind ${APP_HOST:-0.0.0.0}:${APP_PORT:-8080} --workers 1 --threads ${GUNICORN_THREADS:-8} --timeout ${GUNICORN_TIMEOUT:-180} --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-30} app:app"]

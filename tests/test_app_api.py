@@ -165,7 +165,7 @@ class AddTracksApiTests(unittest.TestCase):
         self.assertEqual(payload["music_directory"], "/music")
         self.assertTrue(payload["delete_after_sync"])
 
-    @patch("app._run_auto_sync_if_enabled")
+    @patch("app.run_auto_sync_if_enabled")
     @patch("app.load_library")
     def test_library_runs_auto_sync_after_resolving_mountpoint(self, mock_load_library, mock_auto_sync) -> None:
         mock_load_library.side_effect = [
