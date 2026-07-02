@@ -37,6 +37,12 @@ export interface AutoSyncStatus {
   scanned_count?: number;
 }
 
+export interface Storage {
+  total_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+}
+
 export interface Library {
   mountpoint: string;
   device: Device;
@@ -47,6 +53,7 @@ export interface Library {
   playlists: Playlist[];
   tracks: Track[];
   auto_sync?: AutoSyncStatus;
+  storage?: Storage;
 }
 
 export interface Settings {

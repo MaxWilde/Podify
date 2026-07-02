@@ -7,6 +7,33 @@ function formatDuration(totalSeconds: number): string {
   return `${hours}h ${minutes}m`;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
+function StorageBar() {
+  const { data: library } = useLibrary();
+  const storage = library?.storage;
+  if (!storage || storage.total_bytes <= 0) return null;
+
+  const usedPct = Math.min(100, Math.round((storage.used_bytes / storage.total_bytes) * 100));
+
+  return (
+    <div className="flex items-center gap-2" title={`${formatBytes(storage.free_bytes)} free`}>
+      <span className="text-text-secondary">Storage</span>
+      <div className="h-1.5 w-40 overflow-hidden rounded-full bg-surface-hover">
+        <div className="h-full rounded-full bg-accent" style={{ width: `${usedPct}%` }} />
+      </div>
+      <span className="tabular-nums text-text-secondary">
+        {formatBytes(storage.used_bytes)} / {formatBytes(storage.total_bytes)}
+      </span>
+    </div>
+  );
+}
+
 export function StatusBar() {
   const connectedMountpoint = useMountpointStore((s) => s.connectedMountpoint);
   const { data: library, isFetching, isError } = useLibrary();
@@ -30,9 +57,14 @@ export function StatusBar() {
 
   return (
     <footer className="flex h-8 shrink-0 items-center gap-2 border-t border-border bg-sidebar px-4 text-xs text-text-secondary">
-      <span className={`h-2 w-2 rounded-full ${dotClass}`} />
-      <span>{statusText}</span>
-      {connectedMountpoint && <span className="ml-auto">{connectedMountpoint}</span>}
+      <div className="flex flex-1 items-center gap-2">
+        <span className={`h-2 w-2 rounded-full ${dotClass}`} />
+        <span>{statusText}</span>
+      </div>
+      <div className="flex flex-1 justify-center">{connectedMountpoint && <StorageBar />}</div>
+      <div className="flex flex-1 justify-end">
+        {connectedMountpoint && <span>{connectedMountpoint}</span>}
+      </div>
     </footer>
   );
 }

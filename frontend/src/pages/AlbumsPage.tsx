@@ -7,8 +7,19 @@ import { ConnectGate } from "../components/ConnectGate";
 import { Cover } from "../components/Cover";
 import { groupByAlbum, formatDuration, type AlbumGroup } from "../lib/libraryGroups";
 import { TrackTable } from "../components/TrackTable";
+import { useDeleteTracksMutation } from "../hooks/useLibraryMutations";
 
 function AlbumDetail({ group, mountpoint, onBack }: { group: AlbumGroup; mountpoint: string; onBack: () => void }) {
+  const deleteMutation = useDeleteTracksMutation();
+
+  function deleteAlbum() {
+    if (!window.confirm(`Delete all ${group.tracks.length} track(s) from "${group.album}"?`)) return;
+    deleteMutation.mutate(
+      group.tracks.map((t) => t.ipod_path),
+      { onSuccess: onBack },
+    );
+  }
+
   return (
     <div>
       <button onClick={onBack} className="mb-4 text-sm text-text-secondary hover:text-text">
@@ -21,13 +32,20 @@ function AlbumDetail({ group, mountpoint, onBack }: { group: AlbumGroup; mountpo
           alt={group.album}
           className="h-40 w-40 rounded shadow-lg text-5xl"
         />
-        <div>
+        <div className="min-w-0">
           <div className="text-xs uppercase tracking-wide text-text-secondary">Album</div>
           <h1 className="text-3xl font-bold">{group.album}</h1>
           <div className="mt-1 text-text-secondary">
             {group.artist} · {group.tracks.length} tracks
           </div>
         </div>
+        <button
+          onClick={deleteAlbum}
+          disabled={deleteMutation.isPending}
+          className="ml-auto shrink-0 rounded bg-red-600/80 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+        >
+          {deleteMutation.isPending ? "Deleting..." : "Delete album"}
+        </button>
       </div>
       <TrackTable tracks={group.tracks} mountpoint={mountpoint} showAlbum={false} />
     </div>

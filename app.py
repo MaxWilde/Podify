@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import os
+import shutil
 import tempfile
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
@@ -89,6 +90,17 @@ def library() -> tuple[object, int] | object:
 
         if sync_payload and sync_payload.get("status") not in {"disabled"}:
             payload["auto_sync"] = sync_payload
+
+        # Disk usage of the device the iPod is mounted on, for the storage bar.
+        try:
+            usage = shutil.disk_usage(resolved_mountpoint)
+            payload["storage"] = {
+                "total_bytes": int(usage.total),
+                "used_bytes": int(usage.used),
+                "free_bytes": int(usage.free),
+            }
+        except Exception:
+            pass
     except GpodError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception:

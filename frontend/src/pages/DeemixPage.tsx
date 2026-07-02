@@ -112,6 +112,40 @@ function TrackRow({
   );
 }
 
+function AlbumDownloadButton({
+  albumId,
+  title,
+  artist,
+  quality,
+  mountpoint,
+}: {
+  albumId: string;
+  title: string;
+  artist: string;
+  quality: DeemixQuality;
+  mountpoint: string;
+}) {
+  const albumResult: DeemixSearchResult = {
+    deemix_id: albumId,
+    type: "album",
+    title,
+    artist,
+    album: title,
+    duration_seconds: 0,
+    cover_url: "",
+  };
+  const { label, disabled, trigger } = useDownloadControl(albumResult, quality, mountpoint);
+  return (
+    <button
+      onClick={trigger}
+      disabled={disabled}
+      className="shrink-0 rounded bg-accent px-4 py-1.5 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-50"
+    >
+      {label === "Download" ? "Download album" : label}
+    </button>
+  );
+}
+
 function ResultGrid({
   results,
   quality,
@@ -258,7 +292,18 @@ export function DeemixPage() {
 
       {view.kind === "album" && (
         <>
-          <div className="mb-2 text-sm text-text-secondary">{view.artist}</div>
+          <div className="mb-2 flex items-center gap-3">
+            <div className="text-sm text-text-secondary">{view.artist}</div>
+            <div className="ml-auto">
+              <AlbumDownloadButton
+                albumId={view.id}
+                title={view.title}
+                artist={view.artist}
+                quality={quality}
+                mountpoint={mountpoint}
+              />
+            </div>
+          </div>
           {albumTracksQuery.isFetching && (
             <div className="pt-12 text-center text-text-secondary">Loading tracks...</div>
           )}

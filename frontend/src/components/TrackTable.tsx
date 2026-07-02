@@ -41,29 +41,11 @@ function AddToPlaylistMenu({ trackIds, onClose }: { trackIds: number[]; onClose:
 }
 
 export function TrackTable({ tracks, showAlbum = true }: TrackTableProps) {
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [menuOpenFor, setMenuOpenFor] = useState<"selection" | number | null>(null);
+  const [menuOpenFor, setMenuOpenFor] = useState<number | null>(null);
   const deleteMutation = useDeleteTracksMutation();
 
-  const allSelected = tracks.length > 0 && selected.size === tracks.length;
-
-  function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set(tracks.map((t) => t.id)));
-  }
-
-  function toggleOne(id: number) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function deleteTracksByIds(ids: number[]) {
-    const paths = tracks.filter((t) => ids.includes(t.id)).map((t) => t.ipod_path);
-    deleteMutation.mutate(paths);
-    setSelected(new Set());
+  function deleteTrack(track: Track) {
+    deleteMutation.mutate([track.ipod_path]);
   }
 
   if (tracks.length === 0) {
@@ -72,37 +54,9 @@ export function TrackTable({ tracks, showAlbum = true }: TrackTableProps) {
 
   return (
     <div>
-      {selected.size > 0 && (
-        <div className="mb-2 flex items-center gap-2 rounded bg-surface px-3 py-2 text-sm">
-          <span className="text-text-secondary">{selected.size} selected</span>
-          <div className="relative ml-auto">
-            <button
-              onClick={() => setMenuOpenFor(menuOpenFor === "selection" ? null : "selection")}
-              className="rounded bg-surface-hover px-3 py-1 text-text hover:bg-neutral-700"
-            >
-              Add to playlist
-            </button>
-            {menuOpenFor === "selection" && (
-              <AddToPlaylistMenu
-                trackIds={Array.from(selected)}
-                onClose={() => setMenuOpenFor(null)}
-              />
-            )}
-          </div>
-          <button
-            onClick={() => deleteTracksByIds(Array.from(selected))}
-            className="rounded bg-red-600/80 px-3 py-1 text-white hover:bg-red-600"
-          >
-            Delete
-          </button>
-        </div>
-      )}
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-secondary">
-            <th className="w-8 py-2">
-              <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-            </th>
             <th className="py-2 pr-4">Title</th>
             <th className="py-2 pr-4">Artist</th>
             {showAlbum && <th className="py-2 pr-4">Album</th>}
@@ -114,13 +68,6 @@ export function TrackTable({ tracks, showAlbum = true }: TrackTableProps) {
         <tbody>
           {tracks.map((track) => (
             <tr key={track.id} className="group border-b border-border/50 hover:bg-surface">
-              <td className="py-2">
-                <input
-                  type="checkbox"
-                  checked={selected.has(track.id)}
-                  onChange={() => toggleOne(track.id)}
-                />
-              </td>
               <td className="py-2 pr-4 text-text">{track.title}</td>
               <td className="py-2 pr-4 text-text-secondary">{track.artist}</td>
               {showAlbum && <td className="py-2 pr-4 text-text-secondary">{track.album}</td>}
@@ -140,7 +87,7 @@ export function TrackTable({ tracks, showAlbum = true }: TrackTableProps) {
                     )}
                   </div>
                   <button
-                    onClick={() => deleteTracksByIds([track.id])}
+                    onClick={() => deleteTrack(track)}
                     className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-red-600/80 hover:text-white"
                   >
                     Delete
