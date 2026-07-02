@@ -1,0 +1,28 @@
+services:
+  classicpod-dashboard:
+    build: .
+    ports:
+      - "${HOST_IP:-0.0.0.0}:${HOST_PORT:-8080}:${APP_PORT:-8080}"
+    environment:
+      - DEFAULT_MOUNTPOINT=/ipod
+      - IPOD_RECONNECT_WAIT_SECONDS=60
+      - GPOD_LS_ATTEMPT_TIMEOUT_SECONDS=8
+      - APP_HOST=${APP_HOST:-0.0.0.0}
+      - APP_PORT=${APP_PORT:-8080}
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
+      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-180}
+      - GUNICORN_GRACEFUL_TIMEOUT=${GUNICORN_GRACEFUL_TIMEOUT:-30}
+      - CLASSICPOD_SETTINGS_PATH=/app/data/settings.json
+      - CLASSICPOD_SYNC_STATE_PATH=/app/data/sync_state.json
+    volumes:
+      - type: bind
+        source: ${IPOD_MOUNTPOINT:-/media}
+        target: /ipod
+        bind:
+          propagation: rshared
+      - type: bind
+        source: ${SETTINGS_DIR:-./data}
+        target: /app/data
+      - type: bind
+        source: ${MUSIC_DIR_HOST:?Set MUSIC_DIR_HOST to your host music directory}
+        target: /music
