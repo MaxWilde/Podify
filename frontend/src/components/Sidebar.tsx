@@ -97,6 +97,13 @@ export function Sidebar() {
         </NavLink>
 
         <div className="px-1 pt-4 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          Spotify
+        </div>
+        <NavLink to="/spotify/playlists" className={navLinkClass}>
+          Playlists
+        </NavLink>
+
+        <div className="px-1 pt-4 text-xs font-semibold uppercase tracking-wide text-text-secondary">
           Manage
         </div>
         <NavLink to="/upload" className={navLinkClass}>

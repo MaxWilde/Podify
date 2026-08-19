@@ -344,25 +344,29 @@ def delete_playlist(
         raise GpodError(f"Mountpoint does not exist: {mountpoint}")
 
     normalized_name = _normalize_playlist_name(playlist_name)
-    command = ["gpod-rm", "-M", mountpoint, "-P", normalized_name]
+    # BUGFIX: this used `gpod-rm -M <mount> -P <name>`, which removes *tracks*
+    # and fails when asked to delete a playlist, so deleting a playlist always
+    # errored. gpod-playlistctl (used by every other playlist operation here)
+    # has a `delete` action that calls itdb_playlist_remove(), and going through
+    # _run_gpod_playlistctl also applies resolve_ipod_root() and the iTunesDB
+    # write lock, neither of which the old gpod-rm call did.
     try:
-        with _itunesdb_write_lock(mountpoint, timeout_seconds):
-            result = subprocess.run(
-                command,
-                check=False,
-                text=True,
-                capture_output=True,
-                timeout=timeout_seconds,
-            )
+        result = _run_gpod_playlistctl(
+            mountpoint=mountpoint,
+            action="delete",
+            playlist_name=normalized_name,
+            track_ids=[],
+            timeout_seconds=timeout_seconds,
+        )
     except FileNotFoundError as exc:
-        raise GpodError("gpod-rm is not installed or not available in PATH.") from exc
+        raise GpodError("gpod-playlistctl is not installed or not available in PATH.") from exc
     except subprocess.TimeoutExpired as exc:
         raise GpodError("Timed out while deleting playlist from iPod.") from exc
     except OSError as exc:
-        raise GpodError(f"gpod-rm failed: {exc}") from exc
+        raise GpodError(f"gpod-playlistctl failed: {exc}") from exc
 
     if result.returncode != 0:
-        message = result.stderr.strip() or result.stdout.strip() or "Unknown gpod-rm error."
+        message = result.stderr.strip() or result.stdout.strip() or "Unknown playlist error."
         raise GpodError(f"Deleting playlist failed: {message}")
 
     return {
