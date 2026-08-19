@@ -23,14 +23,19 @@ from deemix_service import (
     load_config as load_deemix_config,
     start_download_job,
 )
+from ipod_service import (
+    GpodError,
+    add_tracks_to_playlist as add_tracks_to_ipod_playlist,
+    create_playlist as create_ipod_playlist,
+    delete_playlist as delete_ipod_playlist,
+    load_library,
+    remove_tracks_from_playlist as remove_tracks_from_ipod_playlist,
+)
 
 
 class SpotifyError(RuntimeError):
     pass
 
-
-SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token"
-SPOTIFY_API_BASE = "https://api.spotify.com/v1"
 
 # Tracks are downloaded in batches so that a long playlist reaches the iPod
 # incrementally instead of staging hundreds of files before the first copy.
@@ -38,7 +43,12 @@ DOWNLOAD_BATCH_SIZE = 20
 DEFAULT_CHECK_INTERVAL_MINUTES = 60
 PLAYLIST_CACHE_TTL_SECONDS = 300
 
-_PLAYLIST_ID_PATTERN = re.compile(r"playlist[/:]([A-Za-z0-9]+)")
+# Spotify ids are 22-character base62. Requiring a plausible length keeps a
+# truncated or placeholder link (".../playlist/YOUR_ID_HERE" stops at the
+# underscore) from being sent to the API as a nonsense id.
+_PLAYLIST_ID_PATTERN = re.compile(r"playlist[/:]([A-Za-z0-9]{16,})")
+# "Copy link" on mobile hands out a short redirect that carries no playlist id.
+_SHORT_LINK_HOSTS = ("spotify.link", "spotify.app.link")
 
 
 def config_path() -> str:
@@ -57,8 +67,6 @@ def playlists_path() -> str:
 
 def _default_config() -> dict[str, Any]:
     return {
-        "client_id": "",
-        "client_secret": "",
         "auto_sync_enabled": False,
         "check_interval_minutes": DEFAULT_CHECK_INTERVAL_MINUTES,
         "quality": "",
@@ -72,8 +80,6 @@ def load_config() -> dict[str, Any]:
     if not isinstance(data, dict):
         return merged
 
-    merged["client_id"] = str(data.get("client_id", "") or "")
-    merged["client_secret"] = str(data.get("client_secret", "") or "")
     merged["auto_sync_enabled"] = bool(data.get("auto_sync_enabled", False))
 
     interval = data.get("check_interval_minutes", DEFAULT_CHECK_INTERVAL_MINUTES)
@@ -95,14 +101,6 @@ def save_config(updates: dict[str, Any]) -> dict[str, Any]:
     current = load_config()
     merged = dict(current)
 
-    client_id = updates.get("client_id")
-    if isinstance(client_id, str) and client_id.strip():
-        merged["client_id"] = client_id.strip()
-
-    client_secret = updates.get("client_secret")
-    if isinstance(client_secret, str) and client_secret.strip():
-        merged["client_secret"] = client_secret.strip()
-
     if "auto_sync_enabled" in updates:
         merged["auto_sync_enabled"] = bool(updates.get("auto_sync_enabled"))
 
@@ -120,7 +118,6 @@ def save_config(updates: dict[str, Any]) -> dict[str, Any]:
         merged["quality"] = normalized_quality
 
     _write_json_file_atomic(config_path(), merged)
-    _reset_token_cache()
     return merged
 
 
@@ -151,8 +148,6 @@ def get_status() -> dict[str, Any]:
     config = load_config()
     return {
         "enabled": True,
-        "credentials_configured": bool(config["client_id"] and config["client_secret"]),
-        "client_id_configured": bool(config["client_id"]),
         "auto_sync_enabled": config["auto_sync_enabled"],
         "check_interval_minutes": config["check_interval_minutes"],
         "quality": effective_quality(),
@@ -161,180 +156,280 @@ def get_status() -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Spotify Web API (client-credentials flow — public playlists only)
-# ---------------------------------------------------------------------------
-
-_TOKEN_LOCK = threading.Lock()
-_TOKEN_CACHE: dict[str, Any] = {"access_token": "", "expires_at": 0.0}
-
-
-def _reset_token_cache() -> None:
-    with _TOKEN_LOCK:
-        _TOKEN_CACHE["access_token"] = ""
-        _TOKEN_CACHE["expires_at"] = 0.0
-
-
-def _access_token() -> str:
-    with _TOKEN_LOCK:
-        if _TOKEN_CACHE["access_token"] and _TOKEN_CACHE["expires_at"] > time.time() + 30:
-            return str(_TOKEN_CACHE["access_token"])
-
-    config = load_config()
-    client_id = config["client_id"]
-    client_secret = config["client_secret"]
-    if not client_id or not client_secret:
-        raise SpotifyError(
-            "Spotify API credentials are not configured. Add a Client ID and Client Secret in Settings."
-        )
-
-    credentials = base64.b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode("ascii")
-    request = urllib.request.Request(
-        SPOTIFY_TOKEN_URL,
-        data=urllib.parse.urlencode({"grant_type": "client_credentials"}).encode("utf-8"),
-        headers={
-            "Authorization": f"Basic {credentials}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        method="POST",
-    )
-
+def _resolve_short_link(url: str) -> str:
+    """Follow a spotify.link redirect to the real open.spotify.com URL. Returns
+    the input unchanged if it cannot be resolved, so the caller still reports a
+    parse error rather than a network one."""
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            payload = json.load(response)
-    except urllib.error.HTTPError as exc:
-        if exc.code in {400, 401, 403}:
-            raise SpotifyError("Spotify rejected the credentials. Check the Client ID and Secret.") from exc
-        raise SpotifyError(f"Spotify authentication failed ({exc.code}).") from exc
-    except urllib.error.URLError as exc:
-        raise SpotifyError(f"Could not reach Spotify: {exc.reason}") from exc
-    except Exception as exc:
-        raise SpotifyError(f"Spotify authentication failed: {exc}") from exc
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            final_url = response.geturl()
+            if _PLAYLIST_ID_PATTERN.search(final_url):
+                return final_url
+            body = response.read(200_000).decode("utf-8", "replace")
+    except Exception:
+        return url
 
-    token = str(payload.get("access_token", "") or "")
-    if not token:
-        raise SpotifyError("Spotify did not return an access token.")
-
-    try:
-        expires_in = int(payload.get("expires_in", 3600))
-    except (TypeError, ValueError):
-        expires_in = 3600
-
-    with _TOKEN_LOCK:
-        _TOKEN_CACHE["access_token"] = token
-        _TOKEN_CACHE["expires_at"] = time.time() + expires_in
-    return token
-
-
-def _api_get(url: str, params: dict[str, str] | None = None) -> dict[str, Any]:
-    if not url.startswith("http"):
-        url = f"{SPOTIFY_API_BASE}{url}"
-    if params:
-        url = f"{url}?{urllib.parse.urlencode(params)}"
-
-    for attempt in range(3):
-        request = urllib.request.Request(
-            url, headers={"Authorization": f"Bearer {_access_token()}"}, method="GET"
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.load(response)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 429 and attempt < 2:
-                retry_after = exc.headers.get("Retry-After") if exc.headers else None
-                try:
-                    delay = min(int(retry_after or 2), 10)
-                except (TypeError, ValueError):
-                    delay = 2
-                time.sleep(delay)
-                continue
-            if exc.code == 401 and attempt < 2:
-                _reset_token_cache()
-                continue
-            if exc.code == 404:
-                raise SpotifyError("Playlist not found. It may be private or the link may be wrong.") from exc
-            raise SpotifyError(f"Spotify request failed ({exc.code}).") from exc
-        except urllib.error.URLError as exc:
-            raise SpotifyError(f"Could not reach Spotify: {exc.reason}") from exc
-        except Exception as exc:
-            raise SpotifyError(f"Spotify request failed: {exc}") from exc
-
-    raise SpotifyError("Spotify request failed after retries.")
+    # These short links are served by a redirect service whose landing page
+    # carries the real Spotify URL in its markup rather than in a Location
+    # header, so fall back to reading it out of the page.
+    match = _PLAYLIST_ID_PATTERN.search(body)
+    return match.group(0) if match else url
 
 
 def parse_playlist_id(url_or_id: str) -> str:
-    """Accept a full playlist URL, a spotify: URI, or a bare playlist id."""
+    """Accept a full playlist URL, a spotify.link share link, a spotify: URI,
+    or a bare playlist id."""
     value = (url_or_id or "").strip()
     if not value:
         raise SpotifyError("A Spotify playlist link is required.")
+
+    if any(host in value for host in _SHORT_LINK_HOSTS):
+        value = _resolve_short_link(value)
 
     match = _PLAYLIST_ID_PATTERN.search(value)
     if match:
         return match.group(1)
     if re.fullmatch(r"[A-Za-z0-9]{16,}", value):
         return value
-    raise SpotifyError("That does not look like a Spotify playlist link.")
-
-
-def fetch_playlist(playlist_id: str) -> dict[str, Any]:
-    """Fetch playlist metadata plus every track (paginated 100 at a time)."""
-    meta = _api_get(
-        f"/playlists/{urllib.parse.quote(playlist_id)}",
-        {"fields": "id,name,owner(display_name),images(url),external_urls(spotify),tracks(total)"},
+    raise SpotifyError(
+        "That does not look like a Spotify playlist link. Expected a link such as "
+        "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M, a spotify:playlist:... URI, "
+        "or a playlist id. Album, artist and track links are not playlists."
     )
 
-    images = meta.get("images") or []
-    tracks: list[dict[str, Any]] = []
-    next_url: str | None = f"{SPOTIFY_API_BASE}/playlists/{urllib.parse.quote(playlist_id)}/tracks"
-    params: dict[str, str] | None = {
-        "limit": "100",
-        "fields": "next,items(track(id,name,type,duration_ms,external_ids(isrc),artists(name),album(name)))",
-    }
 
-    while next_url:
-        page = _api_get(next_url, params)
-        params = None
-        for entry in page.get("items") or []:
-            track = entry.get("track") if isinstance(entry, dict) else None
-            if not isinstance(track, dict):
-                continue
-            if track.get("type") not in (None, "track"):
-                continue  # podcast episodes and other non-track items
-            artists = [
-                str(artist.get("name") or "")
-                for artist in (track.get("artists") or [])
-                if isinstance(artist, dict)
-            ]
-            artists = [name for name in artists if name]
-            track_id = str(track.get("id") or "")
-            title = str(track.get("name") or "")
-            if not title:
-                continue
-            tracks.append(
-                {
-                    # Local files have no id; fall back to a stable synthetic key
-                    # so they can still be tracked as synced/unmatched.
-                    "spotify_id": track_id or f"local:{artists[0] if artists else ''}:{title}",
-                    "title": title,
-                    "artist": artists[0] if artists else "",
-                    "artists": artists,
-                    "album": str((track.get("album") or {}).get("name") or ""),
-                    "isrc": str((track.get("external_ids") or {}).get("isrc") or ""),
-                    "duration_seconds": int((track.get("duration_ms") or 0) / 1000),
-                }
-            )
-        next_url = page.get("next")
+# ---------------------------------------------------------------------------
+# Embed reader. Playlists are read from Spotify's public embed page, which
+# carries the playlist and its track list for any public playlist without an
+# app, a token or any credentials at all. The Web API is deliberately not used:
+# it requires per-user API credentials, refuses apps that lack Web API access
+# with a bare 403, and cannot read Spotify's own editorial playlists anyway.
+# This is an unofficial endpoint, so the parser walks the payload looking for
+# the playlist entity rather than depending on a fixed path through it.
+# ---------------------------------------------------------------------------
+
+EMBED_URL_TEMPLATE = "https://open.spotify.com/embed/playlist/{playlist_id}"
+PAGE_URL_TEMPLATE = "https://open.spotify.com/playlist/{playlist_id}"
+_NEXT_DATA_PATTERN = re.compile(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
+_INITIAL_STATE_PATTERN = re.compile(r'<script id="initialState"[^>]*>(.*?)</script>', re.S)
+
+
+def _find_playlist_entity(node: Any) -> dict[str, Any] | None:
+    if isinstance(node, dict):
+        if isinstance(node.get("trackList"), list) and (node.get("name") or node.get("title")):
+            return node
+        for value in node.values():
+            found = _find_playlist_entity(value)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = _find_playlist_entity(item)
+            if found is not None:
+                return found
+    return None
+
+
+def _normalize_embed_track(entry: dict[str, Any]) -> dict[str, Any] | None:
+    uri = str(entry.get("uri") or "")
+    if not uri.startswith("spotify:track:"):
+        return None  # podcast episodes and other non-track entries
+    title = str(entry.get("title") or "")
+    if not title:
+        return None
+
+    # The embed exposes artists as one display string, so the primary artist —
+    # the one worth matching on — is the first entry.
+    subtitle = str(entry.get("subtitle") or "")
+    artists = [name.strip() for name in subtitle.split(",") if name.strip()]
+    try:
+        duration_seconds = int(int(entry.get("duration") or 0) / 1000)
+    except (TypeError, ValueError):
+        duration_seconds = 0
 
     return {
-        "id": str(meta.get("id") or playlist_id),
-        "name": str(meta.get("name") or "Untitled playlist"),
-        "owner": str((meta.get("owner") or {}).get("display_name") or ""),
-        "image_url": str(images[0].get("url") or "") if images else "",
-        "url": str((meta.get("external_urls") or {}).get("spotify") or "")
-        or f"https://open.spotify.com/playlist/{playlist_id}",
+        "spotify_id": uri.rsplit(":", 1)[-1],
+        "title": title,
+        "artist": artists[0] if artists else "",
+        "artists": artists,
+        # The embed page carries neither album nor ISRC, so Deezer matching goes
+        # by artist and title alone.
+        "album": "",
+        "duration_seconds": duration_seconds,
+    }
+
+
+def _fetch_page(url: str) -> str:
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise SpotifyError("Playlist not found. It may be private or the link may be wrong.") from exc
+        raise SpotifyError(f"Could not read the playlist page ({exc.code}).") from exc
+    except urllib.error.URLError as exc:
+        raise SpotifyError(f"Could not reach Spotify: {exc.reason}") from exc
+
+
+def _normalize_page_track(entry: dict[str, Any]) -> dict[str, Any] | None:
+    data = ((entry.get("itemV2") or {}).get("data")) or {}
+    uri = str(data.get("uri") or "")
+    if data.get("__typename") not in (None, "Track") or not uri.startswith("spotify:track:"):
+        return None  # podcast episodes and other non-track entries
+    title = str(data.get("name") or "")
+    if not title:
+        return None
+
+    artists = [
+        str((artist.get("profile") or {}).get("name") or "")
+        for artist in ((data.get("artists") or {}).get("items") or [])
+        if isinstance(artist, dict)
+    ]
+    artists = [name for name in artists if name]
+    try:
+        duration_seconds = int(int((data.get("duration") or {}).get("totalMilliseconds") or 0) / 1000)
+    except (TypeError, ValueError):
+        duration_seconds = 0
+
+    return {
+        "spotify_id": uri.rsplit(":", 1)[-1],
+        "title": title,
+        "artist": artists[0] if artists else "",
+        "artists": artists,
+        "album": str((data.get("albumOfTrack") or {}).get("name") or ""),
+        "duration_seconds": duration_seconds,
+    }
+
+
+def _fetch_playlist_via_page(playlist_id: str) -> dict[str, Any]:
+    """Read the playlist from the main open.spotify.com page, whose initial
+    state carries the current track list. The embed page lags behind edits —
+    a song added to a playlist can be missing from it for a long time — so this
+    is the source of truth, and it also carries album names, which sharpen the
+    Deezer match."""
+    html = _fetch_page(PAGE_URL_TEMPLATE.format(playlist_id=urllib.parse.quote(playlist_id)))
+
+    match = _INITIAL_STATE_PATTERN.search(html)
+    if not match:
+        raise SpotifyError("Could not read the playlist page.")
+    try:
+        payload = json.loads(base64.b64decode(match.group(1).strip()).decode("utf-8", "replace"))
+    except Exception as exc:
+        raise SpotifyError("Could not read the playlist page.") from exc
+
+    entities = ((payload.get("entities") or {}).get("items")) or {}
+    entity = entities.get(f"spotify:playlist:{playlist_id}")
+    if not isinstance(entity, dict):
+        # Fall back to whichever entity looks like the playlist, in case the key
+        # is spelled differently.
+        entity = next(
+            (
+                value
+                for value in entities.values()
+                if isinstance(value, dict) and isinstance(value.get("content"), dict)
+            ),
+            None,
+        )
+    if not isinstance(entity, dict):
+        raise SpotifyError("Could not find the playlist on its Spotify page. It may be private.")
+
+    content = entity.get("content") or {}
+    tracks = [
+        normalized
+        for normalized in (
+            _normalize_page_track(item)
+            for item in content.get("items") or []
+            if isinstance(item, dict)
+        )
+        if normalized is not None
+    ]
+    if not tracks:
+        raise SpotifyError("The playlist page carried no tracks.")
+
+    sources = ((entity.get("images") or {}).get("items") or [{}])[0].get("sources") or []
+    image_url = _pick_cover(sources)
+
+    total = content.get("totalCount")
+    try:
+        total_count = int(total)
+    except (TypeError, ValueError):
+        total_count = len(tracks)
+
+    return {
+        "id": str(entity.get("id") or playlist_id),
+        "name": str(entity.get("name") or "Untitled playlist"),
+        "owner": str(((entity.get("ownerV2") or {}).get("data") or {}).get("name") or ""),
+        "image_url": image_url,
+        "url": PAGE_URL_TEMPLATE.format(playlist_id=playlist_id),
+        "track_count": len(tracks),
+        # A long playlist is served one page at a time; the rest needs a token
+        # Podify does not have, so say so rather than silently truncating.
+        "incomplete_count": max(total_count - len(tracks), 0),
+        "tracks": tracks,
+    }
+
+
+def _pick_cover(sources: list[Any]) -> str:
+    """Prefer a mid-size cover; the cards render small."""
+    usable = [source for source in sources if isinstance(source, dict) and source.get("url")]
+    if not usable:
+        return ""
+    usable.sort(key=lambda source: abs(int(source.get("width") or 0) - 300))
+    return str(usable[0]["url"])
+
+
+def _fetch_playlist_via_embed(playlist_id: str) -> dict[str, Any]:
+    html = _fetch_page(EMBED_URL_TEMPLATE.format(playlist_id=urllib.parse.quote(playlist_id)))
+
+    match = _NEXT_DATA_PATTERN.search(html)
+    if not match:
+        raise SpotifyError("Could not read the playlist from Spotify's embed page.")
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise SpotifyError("Could not read the playlist from Spotify's embed page.") from exc
+
+    entity = _find_playlist_entity(payload)
+    if entity is None:
+        raise SpotifyError(
+            "Could not find the playlist on Spotify's embed page. It may be private."
+        )
+
+    tracks = [
+        normalized
+        for normalized in (
+            _normalize_embed_track(entry)
+            for entry in entity.get("trackList") or []
+            if isinstance(entry, dict)
+        )
+        if normalized is not None
+    ]
+
+    image_url = _pick_cover((entity.get("coverArt") or {}).get("sources") or [])
+
+    return {
+        "id": str(entity.get("id") or playlist_id),
+        "name": str(entity.get("name") or entity.get("title") or "Untitled playlist"),
+        "owner": str(entity.get("subtitle") or ""),
+        "image_url": image_url,
+        "url": f"https://open.spotify.com/playlist/{playlist_id}",
         "track_count": len(tracks),
         "tracks": tracks,
     }
+
+
+def fetch_playlist(playlist_id: str) -> dict[str, Any]:
+    """Read a public playlist and its tracks, preferring the main page (current)
+    over the embed page (lags behind playlist edits)."""
+    try:
+        return _fetch_playlist_via_page(playlist_id)
+    except SpotifyError as page_error:
+        try:
+            return _fetch_playlist_via_embed(playlist_id)
+        except SpotifyError:
+            raise page_error
 
 
 _TRACK_CACHE_LOCK = threading.Lock()
@@ -342,8 +437,8 @@ _TRACK_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def fetch_playlist_cached(playlist_id: str, force: bool = False) -> dict[str, Any]:
-    """Spotify is rate limited and playlists change slowly, so repeated views of
-    the same playlist reuse a short-lived cached copy."""
+    """Playlists change slowly, so repeated views of the same playlist reuse a
+    short-lived cached copy instead of re-fetching the embed page."""
     now = time.time()
     if not force:
         with _TRACK_CACHE_LOCK:
@@ -386,6 +481,7 @@ def _load_playlists() -> list[dict[str, Any]]:
             continue
         synced = entry.get("synced_ids")
         unmatched = entry.get("unmatched_ids")
+        tags = entry.get("synced_tracks")
         normalized.append(
             {
                 "id": playlist_id,
@@ -401,6 +497,11 @@ def _load_playlists() -> list[dict[str, Any]]:
                 "last_sync_message": str(entry.get("last_sync_message", "") or ""),
                 "synced_ids": [str(item) for item in synced] if isinstance(synced, list) else [],
                 "unmatched_ids": [str(item) for item in unmatched] if isinstance(unmatched, list) else [],
+                # Deezer tags per synced track, so the iPod playlist mirror can
+                # find them in the library on later syncs too.
+                "synced_tracks": tags if isinstance(tags, dict) else {},
+                "ipod_playlist_name": str(entry.get("ipod_playlist_name", "") or ""),
+                "ipod_track_count": int(entry.get("ipod_track_count", 0) or 0),
             }
         )
     return normalized
@@ -433,10 +534,11 @@ def list_playlists() -> list[dict[str, Any]]:
         item["pending_count"] = max(
             playlist["track_count"] - item["synced_count"] - item["unmatched_count"], 0
         )
-        # synced_ids/unmatched_ids can be thousands of strings; the UI only needs
-        # the counts, so they are not sent over the wire.
+        # synced_ids/unmatched_ids/synced_tracks can be thousands of entries; the
+        # UI only needs the counts, so they are not sent over the wire.
         item.pop("synced_ids", None)
         item.pop("unmatched_ids", None)
+        item.pop("synced_tracks", None)
         item["active_job"] = active.get(playlist["id"])
         result.append(item)
     return result
@@ -469,6 +571,9 @@ def add_playlist(url_or_id: str) -> dict[str, Any]:
             "last_sync_message": "",
             "synced_ids": [],
             "unmatched_ids": [],
+            "synced_tracks": {},
+            "ipod_playlist_name": "",
+            "ipod_track_count": 0,
         }
         playlists.append(record)
         _save_playlists(playlists)
@@ -504,6 +609,7 @@ def reset_playlist_sync_state(playlist_id: str) -> None:
         playlist_id,
         synced_ids=[],
         unmatched_ids=[],
+        synced_tracks={},
         last_sync_status="",
         last_sync_message="Sync history cleared.",
     )
@@ -632,38 +738,247 @@ def sync_all(mountpoint: str | None = None, quality: str | None = None) -> list[
     return job_ids
 
 
-def _match_on_deezer(dz: Any, track: dict[str, Any]) -> str | None:
-    """Resolve a Spotify track to a Deezer track id: ISRC first (exact), then
-    Deezer's own artist/track/album matcher, then a plain text search."""
-    isrc = track.get("isrc") or ""
-    if isrc:
+# ---------------------------------------------------------------------------
+# iPod playlist mirror. A tracked Spotify playlist is reproduced as a real
+# playlist on the device holding the same songs, so the iPod shows the playlist
+# and not just a pile of loose tracks.
+# ---------------------------------------------------------------------------
+
+
+def _normalize_match_text(value: str) -> str:
+    lowered = (value or "").casefold()
+    lowered = re.sub(r"\(.*?\)|\[.*?\]", " ", lowered)
+    lowered = re.sub(r"[^a-z0-9]+", " ", lowered)
+    return " ".join(lowered.split())
+
+
+def _base_title(value: str) -> str:
+    """Drop a version suffix (" - Remastered 2011", " - Bonus Track") so the
+    same song spelled differently by Deezer and Spotify collapses to one key."""
+    return _normalize_match_text(re.split(r"\s-\s", value or "", maxsplit=1)[0])
+
+
+class _LibraryIndex:
+    """Library lookup by title and artist. Tags on the device come from Deezer
+    and are reshaped again by the FLAC->ALAC step, so an exact string match on
+    both fields misses a fair number of real matches: featured artists appear on
+    one side only, and titles pick up version suffixes."""
+
+    def __init__(self, tracks: list[dict[str, Any]]) -> None:
+        self.exact: dict[tuple[str, str], int] = {}
+        self.by_title: dict[str, list[tuple[int, str]]] = {}
+        for track in tracks:
+            try:
+                track_id = int(track.get("id"))
+            except (TypeError, ValueError):
+                continue
+            title = str(track.get("title") or "")
+            artist = str(track.get("artist") or "")
+            artist_key = _normalize_match_text(artist)
+            self.exact.setdefault((_normalize_match_text(title), artist_key), track_id)
+            self.by_title.setdefault(_base_title(title), []).append((track_id, artist_key))
+
+    def find(self, title: str, artist: str) -> int | None:
+        if not title:
+            return None
+        artist_key = _normalize_match_text(artist)
+
+        found = self.exact.get((_normalize_match_text(title), artist_key))
+        if found is not None:
+            return found
+
+        candidates = self.by_title.get(_base_title(title), [])
+        if not candidates:
+            return None
+
+        for track_id, candidate_artist in candidates:
+            if candidate_artist == artist_key:
+                return track_id
+
+        # "Kendrick Lamar" vs "Kendrick Lamar, Mary J. Blige" / "... feat. X":
+        # the primary artist leads and features are appended, so compare on the
+        # leading name. A bare substring test would also match "Band" against an
+        # unrelated "Some Band".
+        if artist_key:
+            for track_id, candidate_artist in candidates:
+                if candidate_artist and (
+                    candidate_artist.startswith(f"{artist_key} ")
+                    or artist_key.startswith(f"{candidate_artist} ")
+                ):
+                    return track_id
+
+        # One song with that title in the whole library: it is that one.
+        if len(candidates) == 1:
+            return candidates[0][0]
+        return None
+
+
+def _backfill_deezer_tags(playlist_id: str, spotify_tracks: list[dict[str, Any]]) -> None:
+    """Fill in the Deezer tags of tracks that were synced before Podify started
+    recording them. Without tags the mirror has only Spotify's spelling to match
+    the library on, which misses the songs Deezer titles differently. This costs
+    one search per track, once — no downloads."""
+    with _PLAYLISTS_LOCK:
+        record = next((p for p in _load_playlists() if p["id"] == playlist_id), None)
+    if record is None:
+        return
+
+    synced = set(record["synced_ids"])
+    known = dict(record["synced_tracks"])
+    missing = [
+        track
+        for track in spotify_tracks
+        if track["spotify_id"] in synced and track["spotify_id"] not in known
+    ]
+    if not missing:
+        return
+
+    try:
+        dz = connect_deezer()
+    except DeemixError:
+        return  # no Deezer session; the mirror falls back to Spotify's tags
+
+    for track in missing:
+        found = _match_on_deezer(dz, track)
+        if found:
+            known[track["spotify_id"]] = {"title": found["title"], "artist": found["artist"]}
+
+    if known != record["synced_tracks"]:
+        _update_playlist(playlist_id, synced_tracks=known)
+
+
+def _mirror_playlist_to_ipod(
+    playlist_id: str, playlist_name: str, mountpoint: str, spotify_tracks: list[dict[str, Any]]
+) -> str:
+    """Make an iPod playlist hold exactly the playlist's songs that are on the
+    device, in Spotify's order. Tracks are matched to the library by the Deezer
+    tags they were downloaded with, falling back to Spotify's spelling."""
+    if not mountpoint:
+        return ""
+
+    with _PLAYLISTS_LOCK:
+        record = next((p for p in _load_playlists() if p["id"] == playlist_id), None)
+    if record is None:
+        return ""
+
+    synced = set(record["synced_ids"])
+    known_tags = record["synced_tracks"]
+
+    library = load_library(mountpoint)
+    index = _LibraryIndex(library.get("tracks", []))
+
+    desired: list[int] = []
+    seen: set[int] = set()
+    unlocated: list[str] = []
+    for track in spotify_tracks:
+        spotify_id = track["spotify_id"]
+        if spotify_id not in synced:
+            continue
+        tags = known_tags.get(spotify_id) or {}
+        # Deezer's tags first (they are what is on the device), then Spotify's.
+        track_id = index.find(
+            tags.get("title") or track["title"], tags.get("artist") or track["artist"]
+        )
+        if track_id is None and tags:
+            track_id = index.find(track["title"], track["artist"])
+        if track_id is None:
+            unlocated.append(f'{track["title"]} — {track["artist"]}')
+            continue
+        if track_id not in seen:
+            seen.add(track_id)
+            desired.append(track_id)
+
+    if not desired:
+        return ""
+
+    # A renamed Spotify playlist would otherwise leave the old mirror behind.
+    previous_name = record["ipod_playlist_name"]
+    if previous_name and previous_name != playlist_name:
         try:
-            result = dz.api.get_track_by_ISRC(isrc)
-            deezer_id = str((result or {}).get("id") or "")
-            if deezer_id and deezer_id != "0":
-                return deezer_id
-        except Exception:
+            delete_ipod_playlist(mountpoint, previous_name)
+        except GpodError:
             pass
 
+    # create is a no-op when the playlist already exists.
+    create_ipod_playlist(mountpoint, playlist_name)
+
+    current: list[int] = []
+    for playlist in library.get("playlists", []):
+        if playlist.get("name") == playlist_name:
+            current = [int(track_id) for track_id in playlist.get("track_ids", [])]
+            break
+
+    current_set = set(current)
+    desired_set = set(desired)
+    to_add = [track_id for track_id in desired if track_id not in current_set]
+    to_remove = [track_id for track_id in current if track_id not in desired_set]
+
+    if to_remove:
+        remove_tracks_from_ipod_playlist(mountpoint, playlist_name, to_remove)
+    if to_add:
+        add_tracks_to_ipod_playlist(mountpoint, playlist_name, to_add)
+
+    _update_playlist(
+        playlist_id, ipod_playlist_name=playlist_name, ipod_track_count=len(desired)
+    )
+
+    message = f'iPod playlist "{playlist_name}": {len(desired)} track(s).'
+    if unlocated:
+        listed = "; ".join(unlocated[:3])
+        if len(unlocated) > 3:
+            listed = f"{listed}; ..."
+        message = (
+            f"{message} {len(unlocated)} synced track(s) not found in the iPod library "
+            f"({listed})."
+        )
+    return message
+
+
+def _match_on_deezer(dz: Any, track: dict[str, Any]) -> dict[str, str] | None:
+    """Resolve a Spotify track to a Deezer track: Deezer's own artist/track/album
+    matcher first, then a plain text search.
+
+    Returns the matched track's id plus its Deezer title and artist. Those tags
+    are what deemix writes into the file and therefore what the iPod library
+    reports, so the iPod playlist mirror keys on them rather than on Spotify's
+    spelling of the same song."""
     artist = track.get("artist") or ""
     title = track.get("title") or ""
     album = track.get("album") or ""
-    if artist and title:
-        try:
-            deezer_id = str(dz.api.get_track_id_from_metadata(artist, title, album) or "0")
-            if deezer_id and deezer_id != "0":
-                return deezer_id
-        except Exception:
-            pass
+    if not (artist and title):
+        return None
 
+    def described(item: dict[str, Any]) -> dict[str, str]:
+        return {
+            "id": str(item.get("id") or ""),
+            "title": str(item.get("title") or title),
+            "artist": str((item.get("artist") or {}).get("name") or artist),
+        }
+
+    deezer_id = ""
+    try:
+        candidate = str(dz.api.get_track_id_from_metadata(artist, title, album) or "0")
+        if candidate and candidate != "0":
+            deezer_id = candidate
+    except Exception:
+        pass
+
+    if deezer_id:
         try:
-            data = dz.api.search_track(f"{artist} {title}", limit=1).get("data", [])
-            if data:
-                deezer_id = str(data[0].get("id") or "")
-                if deezer_id and deezer_id != "0":
-                    return deezer_id
+            return described(dz.api.get_track(deezer_id))
         except Exception:
-            pass
+            # The id is good even if the follow-up lookup failed; fall back to
+            # Spotify's tags for the mirror key.
+            return {"id": deezer_id, "title": title, "artist": artist}
+
+    try:
+        data = dz.api.search_track(f"{artist} {title}", limit=1).get("data", [])
+        if data:
+            matched = described(data[0])
+            if matched["id"] and matched["id"] != "0":
+                return matched
+    except Exception:
+        pass
 
     return None
 
@@ -682,8 +997,25 @@ def _execute_sync_job(job_id: str) -> None:
         if job is None:
             return
         playlist_id = job["playlist_id"]
+        playlist_name = job["playlist_name"]
         quality = job["quality"]
         mountpoint = job["mountpoint"]
+
+    def mirror(spotify_tracks: list[dict[str, Any]]) -> str:
+        """Reproduce the playlist on the device. A mirror failure must not fail
+        the sync — the music is already on the iPod either way."""
+        if not mountpoint:
+            return ""
+        try:
+            _backfill_deezer_tags(playlist_id, spotify_tracks)
+        except Exception:
+            pass  # best effort; the mirror still runs on Spotify's tags
+        try:
+            return _mirror_playlist_to_ipod(playlist_id, playlist_name, mountpoint, spotify_tracks)
+        except GpodError as exc:
+            return f"iPod playlist not updated: {exc}"
+        except Exception as exc:
+            return f"iPod playlist not updated: {exc}"
 
     def finish(status: str, message: str) -> None:
         _update_sync_job(job_id, status=status, message=message)
@@ -713,6 +1045,8 @@ def _execute_sync_job(job_id: str) -> None:
             image_url=data["image_url"],
             track_count=data["track_count"],
         )
+        playlist_name = data["name"]
+        _update_sync_job(job_id, playlist_name=playlist_name)
 
         synced_ids = set(tracked["synced_ids"])
         unmatched_ids = set(tracked["unmatched_ids"])
@@ -724,7 +1058,7 @@ def _execute_sync_job(job_id: str) -> None:
         _update_sync_job(job_id, total_count=data["track_count"], new_count=len(pending))
 
         if not pending:
-            finish("done", "Already up to date.")
+            finish("done", " ".join(filter(None, ["Already up to date.", mirror(data["tracks"])])))
             return
 
         try:
@@ -733,15 +1067,13 @@ def _execute_sync_job(job_id: str) -> None:
             finish("error", str(exc))
             return
 
-        matched: list[tuple[str, str]] = []  # (spotify_id, deezer_id)
-        matched_meta: dict[str, dict[str, Any]] = {}
+        matched: list[tuple[str, dict[str, str]]] = []  # (spotify_id, deezer track)
         newly_unmatched: list[str] = []
 
         for index, track in enumerate(pending):
-            deezer_id = _match_on_deezer(dz, track)
-            if deezer_id:
-                matched.append((track["spotify_id"], deezer_id))
-                matched_meta[track["spotify_id"]] = track
+            deezer_track = _match_on_deezer(dz, track)
+            if deezer_track:
+                matched.append((track["spotify_id"], deezer_track))
                 unmatched_ids.discard(track["spotify_id"])
             else:
                 newly_unmatched.append(track["spotify_id"])
@@ -759,12 +1091,33 @@ def _execute_sync_job(job_id: str) -> None:
             first_time_unmatched = [
                 track_id for track_id in newly_unmatched if track_id not in previously_unmatched
             ]
+            mirror_message = mirror(data["tracks"])
             if first_time_unmatched:
-                finish("error", f"No Deezer match found for {len(first_time_unmatched)} new track(s).")
+                finish(
+                    "error",
+                    " ".join(
+                        filter(
+                            None,
+                            [
+                                f"No Deezer match found for {len(first_time_unmatched)} new track(s).",
+                                mirror_message,
+                            ],
+                        )
+                    ),
+                )
             else:
                 finish(
                     "done",
-                    f"Already up to date. {len(newly_unmatched)} track(s) are not available on Deezer.",
+                    " ".join(
+                        filter(
+                            None,
+                            [
+                                f"Already up to date. {len(newly_unmatched)} track(s) are not "
+                                "available on Deezer.",
+                                mirror_message,
+                            ],
+                        )
+                    ),
                 )
             return
 
@@ -782,12 +1135,12 @@ def _execute_sync_job(job_id: str) -> None:
             batch = matched[start : start + DOWNLOAD_BATCH_SIZE]
             items = [
                 {
-                    "id": deezer_id,
+                    "id": deezer_track["id"],
                     "type": "track",
-                    "title": matched_meta[spotify_id]["title"],
-                    "artist": matched_meta[spotify_id]["artist"],
+                    "title": deezer_track["title"],
+                    "artist": deezer_track["artist"],
                 }
-                for spotify_id, deezer_id in batch
+                for _spotify_id, deezer_track in batch
             ]
 
             try:
@@ -805,9 +1158,14 @@ def _execute_sync_job(job_id: str) -> None:
             job_items = (deemix_job or {}).get("items", [])
 
             batch_synced: list[str] = []
-            for (spotify_id, _deezer_id), job_item in zip(batch, job_items):
+            batch_tags: dict[str, dict[str, str]] = {}
+            for (spotify_id, deezer_track), job_item in zip(batch, job_items):
                 if job_item.get("status") == "done":
                     batch_synced.append(spotify_id)
+                    batch_tags[spotify_id] = {
+                        "title": deezer_track["title"],
+                        "artist": deezer_track["artist"],
+                    }
                 else:
                     failed_total += 1
 
@@ -821,17 +1179,27 @@ def _execute_sync_job(job_id: str) -> None:
                         finish("error", "Playlist is no longer tracked.")
                         return
                     merged_synced = sorted(set(current_playlist["synced_ids"]) | set(batch_synced))
-                    _update_playlist(playlist_id, synced_ids=merged_synced)
+                    merged_tags = dict(current_playlist["synced_tracks"])
+                    merged_tags.update(batch_tags)
+                    _update_playlist(
+                        playlist_id, synced_ids=merged_synced, synced_tracks=merged_tags
+                    )
 
             _update_sync_job(
                 job_id, downloaded_count=downloaded_total, failed_count=failed_total
             )
 
         parts = [f"Synced {downloaded_total} new track(s)."]
+        incomplete = int(data.get("incomplete_count", 0) or 0)
+        if incomplete:
+            parts.append(f"{incomplete} track(s) of this playlist are not readable without a login.")
         if failed_total:
             parts.append(f"{failed_total} failed to download.")
         if newly_unmatched:
             parts.append(f"{len(newly_unmatched)} not found on Deezer.")
+        mirror_message = mirror(data["tracks"])
+        if mirror_message:
+            parts.append(mirror_message)
         finish("done" if downloaded_total else "error", " ".join(parts))
     except SpotifyError as exc:
         finish("error", str(exc))
@@ -881,8 +1249,6 @@ def _scheduler_loop() -> None:
 def _run_due_playlists() -> None:
     config = load_config()
     if not config["auto_sync_enabled"]:
-        return
-    if not (config["client_id"] and config["client_secret"]):
         return
 
     mountpoint = config["last_mountpoint"]

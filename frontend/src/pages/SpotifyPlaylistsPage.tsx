@@ -1,8 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addSpotifyPlaylist,
-  getSpotifyConfig,
   getSpotifyPlaylistTracks,
   getSpotifyPlaylists,
   removeSpotifyPlaylist,
@@ -221,8 +220,6 @@ export function SpotifyPlaylistsPage() {
   const [url, setUrl] = useState("");
   const [openPlaylist, setOpenPlaylist] = useState<{ id: string; name: string } | null>(null);
 
-  const configQuery = useQuery({ queryKey: ["spotify-config"], queryFn: getSpotifyConfig });
-
   const playlistsQuery = useQuery({
     queryKey: [PLAYLISTS_QUERY_KEY],
     queryFn: getSpotifyPlaylists,
@@ -230,6 +227,17 @@ export function SpotifyPlaylistsPage() {
     refetchInterval: (query) =>
       (query.state.data ?? []).some((playlist) => playlist.active_job) ? 2000 : 20000,
   });
+
+  // A sync rewrites which tracks are on the device, so refresh any open track
+  // list once the last running job finishes.
+  const anyActive = (playlistsQuery.data ?? []).some((playlist) => playlist.active_job);
+  const wasActive = useRef(false);
+  useEffect(() => {
+    if (wasActive.current && !anyActive) {
+      queryClient.invalidateQueries({ queryKey: ["spotify-playlist-tracks"] });
+    }
+    wasActive.current = anyActive;
+  }, [anyActive, queryClient]);
 
   const invalidate = (playlists?: SpotifyPlaylist[]) => {
     if (playlists) queryClient.setQueryData([PLAYLISTS_QUERY_KEY], playlists);
@@ -294,17 +302,6 @@ export function SpotifyPlaylistsPage() {
     },
     onError,
   });
-
-  if (configQuery.data && !configQuery.data.credentials_configured) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 pt-12 text-center text-text-secondary">
-        <p className="text-lg text-text">Spotify is not configured yet.</p>
-        <p className="text-sm">
-          Add a Spotify Client ID and Client Secret in Settings to track playlists.
-        </p>
-      </div>
-    );
-  }
 
   if (openPlaylist) {
     return (

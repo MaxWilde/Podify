@@ -116,8 +116,6 @@ export interface ApiError {
 
 export interface SpotifyConfig {
   enabled: boolean;
-  credentials_configured: boolean;
-  client_id_configured: boolean;
   auto_sync_enabled: boolean;
   check_interval_minutes: number;
   quality: DeemixQuality;
@@ -158,6 +156,8 @@ export interface SpotifyPlaylist {
   last_synced_at: number;
   last_sync_status: string;
   last_sync_message: string;
+  ipod_playlist_name: string;
+  ipod_track_count: number;
   synced_count: number;
   unmatched_count: number;
   pending_count: number;
@@ -172,7 +172,6 @@ export interface SpotifyTrack {
   artist: string;
   artists: string[];
   album: string;
-  isrc: string;
   duration_seconds: number;
   sync_state: SpotifyTrackSyncState;
 }

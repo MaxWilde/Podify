@@ -12,8 +12,6 @@ export function getSpotifyConfig(): Promise<SpotifyConfig> {
 }
 
 export interface SaveSpotifyConfigInput {
-  client_id?: string;
-  client_secret?: string;
   auto_sync_enabled?: boolean;
   check_interval_minutes?: number;
   quality?: DeemixQuality;
