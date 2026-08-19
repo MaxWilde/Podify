@@ -9,6 +9,12 @@ __pycache__/
 # default path used when DEEMIX_CONFIG_PATH is unset (local/dev runs).
 .deemix_config.json
 deemix_config.json
+# Spotify config holds the API client secret — never commit it. Same for the
+# tracked-playlist state. Default paths when SPOTIFY_*_PATH are unset.
+.spotify_config.json
+spotify_config.json
+.spotify_playlists.json
+spotify_playlists.json
 .CLAUDE.md
 .dockerignore
 CLAUDE.md

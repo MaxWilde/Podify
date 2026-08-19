@@ -24,10 +24,12 @@ from ipod_service import (
 )
 from settings_service import load_settings
 from settings_service import save_settings
+from spotify_routes import spotify_bp
 
 
 app = Flask(__name__)
 app.register_blueprint(deemix_bp)
+app.register_blueprint(spotify_bp)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 2GB
 
 if os.environ.get("DEBUG", "").strip().lower() in {"1", "true", "yes"}:

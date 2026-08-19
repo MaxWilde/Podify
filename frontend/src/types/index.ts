@@ -113,3 +113,66 @@ export interface DeemixJob {
 export interface ApiError {
   error: string;
 }
+
+export interface SpotifyConfig {
+  enabled: boolean;
+  credentials_configured: boolean;
+  client_id_configured: boolean;
+  auto_sync_enabled: boolean;
+  check_interval_minutes: number;
+  quality: DeemixQuality;
+  last_mountpoint: string;
+  playlist_count: number;
+}
+
+export type SpotifySyncStatus = "queued" | "resolving" | "downloading" | "done" | "error";
+
+export interface SpotifySyncJob {
+  job_id: string;
+  playlist_id: string;
+  playlist_name: string;
+  quality: DeemixQuality;
+  mountpoint: string;
+  status: SpotifySyncStatus;
+  total_count: number;
+  new_count: number;
+  resolved_count: number;
+  matched_count: number;
+  unmatched_count: number;
+  downloaded_count: number;
+  failed_count: number;
+  deemix_job_ids: string[];
+  message: string;
+  created_at: number;
+}
+
+export interface SpotifyPlaylist {
+  id: string;
+  name: string;
+  owner: string;
+  image_url: string;
+  url: string;
+  track_count: number;
+  added_at: number;
+  auto_sync: boolean;
+  last_synced_at: number;
+  last_sync_status: string;
+  last_sync_message: string;
+  synced_count: number;
+  unmatched_count: number;
+  pending_count: number;
+  active_job: SpotifySyncJob | null;
+}
+
+export type SpotifyTrackSyncState = "synced" | "unmatched" | "pending";
+
+export interface SpotifyTrack {
+  spotify_id: string;
+  title: string;
+  artist: string;
+  artists: string[];
+  album: string;
+  isrc: string;
+  duration_seconds: number;
+  sync_state: SpotifyTrackSyncState;
+}

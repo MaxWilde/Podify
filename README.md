@@ -19,6 +19,10 @@ into your library.
   and an album's songs, and download at configurable quality (FLAC / MP3 320 / MP3 128).
 - **Automatic pipeline** — downloads land in your Music Directory, FLAC is converted to ALAC, and
   files are copied onto the iPod via `gpod-cp`. Staged downloads are removed once they're on the device.
+- **Spotify playlists** — paste a public Spotify playlist link to track it. Podify reads the playlist
+  through the Spotify Web API, matches each song on Deezer (by ISRC first, then artist/title), and
+  downloads the new ones through the deemix pipeline onto the iPod. Playlists can re-check themselves
+  in the background, and only tracks that aren't already on the device are downloaded.
 - **Auto-sync** — optionally scan the Music Directory and import new FLAC files when an iPod connects.
 
 ## Architecture
@@ -29,7 +33,8 @@ React (Vite/TS) frontend  ──►  Flask API (app.py)
                                  ├─ album_art.py         album art extraction
                                  ├─ flac2alac_converter  FLAC → ALAC
                                  ├─ auto_sync.py         Music Directory → iPod
-                                 └─ deemix_routes.py     /api/deemix/* (deemix_service.py)
+                                 ├─ deemix_routes.py     /api/deemix/* (deemix_service.py)
+                                 └─ spotify_routes.py    /api/spotify/* (spotify_service.py)
 ```
 
 In production the frontend is built (`frontend/dist`) and served as static files by Flask.
@@ -60,6 +65,29 @@ In production the frontend is built (`frontend/dist`) and served as static files
 Downloading requires a Deezer ARL token. Add it in **Settings → Deezer ARL Token**. It is stored
 server-side only (in `data/deemix_config.json`, which is gitignored) and never exposed back to the
 frontend beyond a "configured" flag. **Never commit it.**
+
+### Spotify playlist tracking
+
+Spotify does not allow downloading, so Podify uses Spotify only to *read* a playlist and then
+sources the audio from Deezer via deemix. That needs two things:
+
+1. **Deezer ARL token** (above) — the actual downloads go through deemix.
+2. **Spotify API credentials** — create an app at
+   [developer.spotify.com](https://developer.spotify.com/dashboard) and paste the **Client ID** and
+   **Client Secret** into **Settings → Spotify**. They are stored server-side in
+   `data/spotify_config.json` (gitignored) and never returned to the frontend.
+
+Then open **Spotify → Playlists**, paste a playlist link (`https://open.spotify.com/playlist/...`,
+a `spotify:playlist:` URI, or a bare playlist id) and click **Track playlist**. Each card shows how
+many of its tracks are already on the iPod, and **Sync now** downloads the rest. Tracks with no
+Deezer match are flagged and retried on later syncs. **Reset** forgets a playlist's sync history so
+the next sync re-downloads everything.
+
+Only public playlists are readable — the client-credentials flow has no access to private ones.
+
+With **Settings → Spotify → check tracked playlists in the background** enabled, playlists marked
+*Auto-sync* are re-checked on the configured interval and new tracks are downloaded automatically,
+using the last mountpoint that was synced from the UI.
 
 ## Frontend development
 
@@ -128,6 +156,8 @@ npm run build      # outputs to frontend/dist
 | `HOST_IP` / `HOST_PORT` | Published bind address / port | `0.0.0.0` / `8080` |
 | `APP_PORT` | Container port | `8080` |
 | `DEEMIX_DOWNLOAD_SUBDIR` | Subfolder in `/music` for deemix downloads | `deemix` |
+| `SPOTIFY_CONFIG_PATH` | Spotify API credentials / auto-sync config | `.spotify_config.json` |
+| `SPOTIFY_PLAYLISTS_PATH` | Tracked playlists and their sync state | `.spotify_playlists.json` |
 | `GUNICORN_THREADS` | Worker threads (single worker — see note) | `8` |
 
 > The app runs as a **single gunicorn worker** because deemix job state is held in-process;
