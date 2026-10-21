@@ -85,9 +85,6 @@ export function Sidebar() {
         <NavLink to="/library/tracks" className={navLinkClass}>
           Tracks
         </NavLink>
-        <NavLink to="/library/playlists" className={navLinkClass}>
-          Playlists
-        </NavLink>
 
         <div className="px-1 pt-4 text-xs font-semibold uppercase tracking-wide text-text-secondary">
           Deemix
