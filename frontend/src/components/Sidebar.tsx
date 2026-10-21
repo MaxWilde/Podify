@@ -6,6 +6,7 @@ import { useUiStore } from "../store/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import { getLibrary } from "../api/library";
 import { LIBRARY_QUERY_KEY } from "../hooks/useLibrary";
+import { useDiscoverAlbums } from "../hooks/useDiscoverAlbums";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded px-3 py-1.5 text-sm transition-colors ${
@@ -21,6 +22,10 @@ export function Sidebar() {
   const closeDrawers = useUiStore((s) => s.closeDrawers);
   const queryClient = useQueryClient();
   const [connecting, setConnecting] = useState(false);
+  const discoverAlbums = useDiscoverAlbums();
+  const trialCount = (discoverAlbums.data?.albums ?? []).filter(
+    (album) => album.status === "trial" || album.status === "pending",
+  ).length;
 
   async function handleConnect() {
     setConnecting(true);
@@ -87,17 +92,25 @@ export function Sidebar() {
         </NavLink>
 
         <div className="px-1 pt-4 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          Discover
+        </div>
+        <NavLink to="/discover" className={(state) => `${navLinkClass(state)} flex items-center justify-between`}>
+          <span>For you</span>
+          {trialCount > 0 && (
+            <span
+              title={`${trialCount} album(s) on trial`}
+              className="rounded-full bg-accent/20 px-1.5 text-[11px] font-semibold text-accent"
+            >
+              {trialCount}
+            </span>
+          )}
+        </NavLink>
+
+        <div className="px-1 pt-4 text-xs font-semibold uppercase tracking-wide text-text-secondary">
           Deemix
         </div>
         <NavLink to="/deemix" className={navLinkClass}>
           Download
-        </NavLink>
-
-        <div className="px-1 pt-4 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-          Spotify
-        </div>
-        <NavLink to="/spotify/playlists" className={navLinkClass}>
-          Playlists
         </NavLink>
 
         <div className="px-1 pt-4 text-xs font-semibold uppercase tracking-wide text-text-secondary">

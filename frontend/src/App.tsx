@@ -4,7 +4,7 @@ import { AlbumsPage } from "./pages/AlbumsPage";
 import { ArtistsPage } from "./pages/ArtistsPage";
 import { TracksPage } from "./pages/TracksPage";
 import { DeemixPage } from "./pages/DeemixPage";
-import { SpotifyPlaylistsPage } from "./pages/SpotifyPlaylistsPage";
+import { DiscoverPage } from "./pages/DiscoverPage";
 import { UploadPage } from "./pages/UploadPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -16,9 +16,8 @@ function App() {
         <Route path="/library/albums" element={<AlbumsPage />} />
         <Route path="/library/artists" element={<ArtistsPage />} />
         <Route path="/library/tracks" element={<TracksPage />} />
+        <Route path="/discover" element={<DiscoverPage />} />
         <Route path="/deemix" element={<DeemixPage />} />
-        <Route path="/spotify" element={<Navigate to="/spotify/playlists" replace />} />
-        <Route path="/spotify/playlists" element={<SpotifyPlaylistsPage />} />
         <Route path="/upload" element={<UploadPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/library/albums" replace />} />

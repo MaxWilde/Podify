@@ -4,14 +4,6 @@ export interface Device {
   model_number: string;
 }
 
-export interface Playlist {
-  name: string;
-  type: string;
-  count: number;
-  smartpl: boolean;
-  track_ids: number[];
-}
-
 export interface Track {
   id: number;
   title: string;
@@ -50,7 +42,6 @@ export interface Library {
   artist_count: number;
   album_count: number;
   total_duration_seconds: number;
-  playlists: Playlist[];
   tracks: Track[];
   auto_sync?: AutoSyncStatus;
   storage?: Storage;
@@ -114,64 +105,81 @@ export interface ApiError {
   error: string;
 }
 
-export interface SpotifyConfig {
-  enabled: boolean;
-  auto_sync_enabled: boolean;
-  check_interval_minutes: number;
-  quality: DeemixQuality;
-  last_mountpoint: string;
-  playlist_count: number;
+export interface DiscoverPreferences {
+  temperature: number;
+  batch_size: number;
+  trial_days: number;
+  trial_quality: DeemixQuality | "";
+  max_active_trials: number;
+  include_eps: boolean;
+  weekly_refresh: boolean;
 }
 
-export type SpotifySyncStatus = "queued" | "resolving" | "downloading" | "done" | "error";
-
-export interface SpotifySyncJob {
-  job_id: string;
-  playlist_id: string;
-  playlist_name: string;
-  quality: DeemixQuality;
-  mountpoint: string;
-  status: SpotifySyncStatus;
-  total_count: number;
-  new_count: number;
-  resolved_count: number;
-  matched_count: number;
-  unmatched_count: number;
-  downloaded_count: number;
-  failed_count: number;
-  deemix_job_ids: string[];
-  message: string;
-  created_at: number;
-}
-
-export interface SpotifyPlaylist {
+export interface DiscoverSuggestion {
   id: string;
-  name: string;
-  owner: string;
-  image_url: string;
-  url: string;
-  track_count: number;
-  added_at: number;
-  auto_sync: boolean;
-  last_synced_at: number;
-  last_sync_status: string;
-  last_sync_message: string;
-  ipod_playlist_name: string;
-  ipod_track_count: number;
-  synced_count: number;
-  unmatched_count: number;
-  pending_count: number;
-  active_job: SpotifySyncJob | null;
-}
-
-export type SpotifyTrackSyncState = "synced" | "unmatched" | "pending";
-
-export interface SpotifyTrack {
-  spotify_id: string;
   title: string;
   artist: string;
-  artists: string[];
-  album: string;
-  duration_seconds: number;
-  sync_state: SpotifyTrackSyncState;
+  artist_id: string;
+  cover_url: string;
+  record_type: string;
+  release_date: string;
+  // 0 = artist you own, 1 = related, 2 = two steps out, 3 = genre chart.
+  distance: number;
+  reason: string;
+}
+
+export interface DiscoverGeneration {
+  status: "idle" | "running" | "error";
+  message: string;
+  started_at: number;
+  error: string;
+}
+
+export interface DiscoverSuggestions {
+  generated_at: number;
+  temperature: number | null;
+  items: DiscoverSuggestion[];
+  generation: DiscoverGeneration;
+}
+
+export type DiscoverAlbumMode = "trial" | "permanent";
+
+export type DiscoverAlbumStatus = "pending" | "trial" | "kept" | "expired" | "removed" | "failed";
+
+export type DiscoverItemType = "album" | "track";
+
+export interface DiscoverAlbum {
+  // Record id: the Deezer album id, or "track-<id>" for a single song.
+  id: string;
+  type?: DiscoverItemType;
+  deezer_id?: string;
+  title: string;
+  album?: string;
+  artist: string;
+  artist_id: string;
+  cover_url: string;
+  reason: string;
+  mode: DiscoverAlbumMode;
+  status: DiscoverAlbumStatus;
+  quality: DeemixQuality;
+  mountpoint: string;
+  created_at: number;
+  updated_at: number;
+  added_at: number;
+  expires_at: number;
+  expired_at?: number;
+  plays?: number;
+  track_count: number;
+  message: string;
+  progress: { status: "queued" | "downloading" | "copying"; percent: number } | null;
+}
+
+export interface DiscoverAlbums {
+  now: number;
+  albums: DiscoverAlbum[];
+}
+
+export interface BlockedArtist {
+  id: string;
+  name: string;
 }

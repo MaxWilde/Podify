@@ -9,12 +9,9 @@ __pycache__/
 # default path used when DEEMIX_CONFIG_PATH is unset (local/dev runs).
 .deemix_config.json
 deemix_config.json
-# Local Spotify state: auto-sync config and tracked playlists. Default paths
-# when SPOTIFY_*_PATH are unset.
-.spotify_config.json
-spotify_config.json
-.spotify_playlists.json
-spotify_playlists.json
+# Discover state and Deezer lookup cache (default paths when DISCOVER_*_PATH are unset).
+.discover_state.json
+.discover_cache.json
 .CLAUDE.md
 .dockerignore
 CLAUDE.md
