@@ -297,12 +297,27 @@ class PlaylistMutationTests(unittest.TestCase):
         self.assertEqual(kwargs["track_ids"], [])
 
     @patch("ipod_service.os.path.exists", return_value=True)
-    @patch("ipod_service.subprocess.run")
-    def test_delete_playlist_uses_gpod_rm_playlist_flag(self, mock_run, _mock_exists) -> None:
-        mock_run.return_value = unittest.mock.Mock(returncode=0, stdout="", stderr="")
-        delete_playlist("/ipod", "Road Trip")
-        command = mock_run.call_args[0][0]
-        self.assertEqual(command, ["gpod-rm", "-M", "/ipod", "-P", "Road Trip"])
+    @patch("ipod_service._run_gpod_playlistctl")
+    def test_delete_playlist_uses_playlistctl_delete_action(self, mock_ctl, _mock_exists) -> None:
+        # Deleting used to shell out to `gpod-rm -P`, which removes tracks and
+        # cannot delete a playlist, so every delete failed.
+        mock_ctl.return_value = unittest.mock.Mock(returncode=0, stdout="", stderr="")
+        result = delete_playlist("/ipod", "Road Trip")
+        self.assertEqual(result["name"], "Road Trip")
+        kwargs = mock_ctl.call_args.kwargs
+        self.assertEqual(kwargs["action"], "delete")
+        self.assertEqual(kwargs["playlist_name"], "Road Trip")
+        self.assertEqual(kwargs["track_ids"], [])
+
+    @patch("ipod_service.os.path.exists", return_value=True)
+    @patch("ipod_service._run_gpod_playlistctl")
+    def test_delete_playlist_reports_the_tool_error(self, mock_ctl, _mock_exists) -> None:
+        mock_ctl.return_value = unittest.mock.Mock(
+            returncode=1, stdout="", stderr="playlist `Road Trip` is read-only"
+        )
+        with self.assertRaises(GpodError) as ctx:
+            delete_playlist("/ipod", "Road Trip")
+        self.assertIn("read-only", str(ctx.exception))
 
     @patch("ipod_service.os.path.exists", return_value=True)
     @patch("ipod_service._run_gpod_playlistctl")

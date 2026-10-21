@@ -322,6 +322,19 @@ def get_jobs() -> list[dict[str, Any]]:
         return [dict(job, items=[dict(item) for item in job["items"]]) for job in reversed(_JOBS.values())]
 
 
+def get_job(job_id: str) -> dict[str, Any] | None:
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        return dict(job, items=[dict(item) for item in job["items"]]) if job else None
+
+
+def connect_deezer():
+    """Public accessor for the logged-in Deezer session, so other services
+    (Spotify playlist sync) can reuse the configured ARL without duplicating
+    the login handling."""
+    return _connect()
+
+
 def start_download_job(items: list[dict[str, Any]], quality: str = DEFAULT_QUALITY, mountpoint: str | None = None) -> str:
     job = _new_job(items, quality, mountpoint)
     thread = threading.Thread(target=_run_download_job, args=(job["job_id"],), daemon=True)

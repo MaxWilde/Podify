@@ -18,6 +18,8 @@ services:
       - CLASSICPOD_SYNC_STATE_PATH=/app/data/sync_state.json
       - DEEMIX_CONFIG_PATH=/app/data/deemix_config.json
       - DEEMIX_DOWNLOAD_SUBDIR=${DEEMIX_DOWNLOAD_SUBDIR:-deemix}
+      - SPOTIFY_CONFIG_PATH=/app/data/spotify_config.json
+      - SPOTIFY_PLAYLISTS_PATH=/app/data/spotify_playlists.json
     volumes:
       - type: bind
         source: ${IPOD_MOUNTPOINT:-/media}
