@@ -70,68 +70,6 @@ class AddTracksApiTests(unittest.TestCase):
         self.assertEqual(len(kwargs["file_paths"]), 1)
         self.assertTrue(kwargs["file_paths"][0].endswith(".flac"))
 
-    @patch("app.create_playlist")
-    def test_create_playlist_endpoint(self, mock_create_playlist) -> None:
-        mock_create_playlist.return_value = {"name": "Road Trip"}
-        response = self.client.post(
-            "/api/playlists/create",
-            json={
-                "mountpoint": "/ipod",
-                "playlist_name": "Road Trip",
-            },
-        )
-        self.assertEqual(response.status_code, 200)
-        payload = response.get_json()
-        self.assertIn("created", payload["message"].lower())
-        mock_create_playlist.assert_called_once_with("/ipod", "Road Trip")
-
-    @patch("app.delete_playlist")
-    def test_delete_playlist_endpoint(self, mock_delete_playlist) -> None:
-        mock_delete_playlist.return_value = {"name": "Road Trip"}
-        response = self.client.post(
-            "/api/playlists/delete",
-            json={
-                "mountpoint": "/ipod",
-                "playlist_name": "Road Trip",
-            },
-        )
-        self.assertEqual(response.status_code, 200)
-        payload = response.get_json()
-        self.assertIn("deleted", payload["message"].lower())
-        mock_delete_playlist.assert_called_once_with("/ipod", "Road Trip")
-
-    @patch("app.add_tracks_to_playlist")
-    def test_add_tracks_to_playlist_endpoint(self, mock_add_tracks_to_playlist) -> None:
-        mock_add_tracks_to_playlist.return_value = {"requested_count": 2}
-        response = self.client.post(
-            "/api/playlists/add-tracks",
-            json={
-                "mountpoint": "/ipod",
-                "playlist_name": "Road Trip",
-                "track_ids": [10, 11],
-            },
-        )
-        self.assertEqual(response.status_code, 200)
-        payload = response.get_json()
-        self.assertEqual(payload["added_count"], 2)
-        mock_add_tracks_to_playlist.assert_called_once_with("/ipod", "Road Trip", [10, 11])
-
-    @patch("app.remove_tracks_from_playlist")
-    def test_remove_tracks_from_playlist_endpoint(self, mock_remove_tracks_from_playlist) -> None:
-        mock_remove_tracks_from_playlist.return_value = {"requested_count": 1}
-        response = self.client.post(
-            "/api/playlists/remove-tracks",
-            json={
-                "mountpoint": "/ipod",
-                "playlist_name": "Road Trip",
-                "track_ids": [10],
-            },
-        )
-        self.assertEqual(response.status_code, 200)
-        payload = response.get_json()
-        self.assertEqual(payload["removed_count"], 1)
-        mock_remove_tracks_from_playlist.assert_called_once_with("/ipod", "Road Trip", [10])
-
     @patch("app.load_settings")
     def test_get_settings_endpoint(self, mock_load_settings) -> None:
         mock_load_settings.return_value = {

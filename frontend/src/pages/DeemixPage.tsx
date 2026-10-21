@@ -6,6 +6,7 @@ import { useMountpointStore } from "../store/mountpoint";
 import { toastErrorMessage } from "../store/toast";
 import { getDeemixAlbumTracks, getDeemixArtistAlbums, getDeemixConfig, searchDeemix } from "../api/deemix";
 import { useDownloadControl } from "../hooks/useDownloadControl";
+import { useTrialControl } from "../hooks/useTrialControl";
 import type { DeemixQuality, DeemixSearchResult } from "../types";
 import { formatDuration } from "../lib/libraryGroups";
 
@@ -20,7 +21,17 @@ const TYPE_LABEL: Record<DeemixSearchResult["type"], string> = {
 type DeemixView =
   | { kind: "search" }
   | { kind: "artist"; id: string; name: string }
-  | { kind: "album"; id: string; title: string; artist: string };
+  | { kind: "album"; id: string; title: string; artist: string; cover: string };
+
+const TRIAL_HINT = "Put it on the iPod for a while — it's removed automatically unless you keep it (Discover → On trial)";
+
+function TrialButton({ trial, className }: { trial: ReturnType<typeof useTrialControl>; className: string }) {
+  return (
+    <button onClick={trial.trigger} disabled={trial.disabled} title={TRIAL_HINT} className={className}>
+      {trial.label}
+    </button>
+  );
+}
 
 function ResultCard({
   result,
@@ -34,6 +45,7 @@ function ResultCard({
   onOpen?: () => void;
 }) {
   const { label, disabled, trigger } = useDownloadControl(result, quality, mountpoint);
+  const trial = useTrialControl(result, quality, mountpoint);
   const isArtist = result.type === "artist";
 
   const cover = (
@@ -68,13 +80,21 @@ function ResultCard({
       {result.duration_seconds > 0 && (
         <div className="text-xs text-text-secondary">{formatDuration(result.duration_seconds)}</div>
       )}
-      <button
-        onClick={trigger}
-        disabled={disabled}
-        className="mt-2 w-full rounded bg-accent px-2 py-1 text-xs font-semibold text-black hover:opacity-90 disabled:opacity-50"
-      >
-        {label}
-      </button>
+      <div className="mt-2 flex gap-2">
+        <button
+          onClick={trigger}
+          disabled={disabled}
+          className="min-w-0 flex-1 truncate rounded bg-accent px-2 py-1 text-xs font-semibold text-black hover:opacity-90 disabled:opacity-50"
+        >
+          {label}
+        </button>
+        {!isArtist && (
+          <TrialButton
+            trial={trial}
+            className="shrink-0 whitespace-nowrap rounded bg-surface-hover px-2 py-1 text-xs font-semibold text-text hover:bg-border disabled:opacity-50"
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -91,6 +111,7 @@ function TrackRow({
   index: number;
 }) {
   const { label, disabled, trigger } = useDownloadControl(result, quality, mountpoint);
+  const trial = useTrialControl(result, quality, mountpoint);
   return (
     <div className="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-surface">
       <span className="w-6 shrink-0 text-right text-xs text-text-secondary">{index + 1}</span>
@@ -108,6 +129,10 @@ function TrackRow({
       >
         {label}
       </button>
+      <TrialButton
+        trial={trial}
+        className="shrink-0 whitespace-nowrap rounded bg-surface-hover px-3 py-1 text-xs font-semibold text-text hover:bg-border disabled:opacity-50"
+      />
     </div>
   );
 }
@@ -116,12 +141,14 @@ function AlbumDownloadButton({
   albumId,
   title,
   artist,
+  cover,
   quality,
   mountpoint,
 }: {
   albumId: string;
   title: string;
   artist: string;
+  cover: string;
   quality: DeemixQuality;
   mountpoint: string;
 }) {
@@ -132,17 +159,24 @@ function AlbumDownloadButton({
     artist,
     album: title,
     duration_seconds: 0,
-    cover_url: "",
+    cover_url: cover,
   };
   const { label, disabled, trigger } = useDownloadControl(albumResult, quality, mountpoint);
+  const trial = useTrialControl(albumResult, quality, mountpoint);
   return (
-    <button
-      onClick={trigger}
-      disabled={disabled}
-      className="shrink-0 rounded bg-accent px-4 py-1.5 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-50"
-    >
-      {label === "Download" ? "Download album" : label}
-    </button>
+    <div className="flex shrink-0 gap-2">
+      <button
+        onClick={trigger}
+        disabled={disabled}
+        className="rounded bg-accent px-4 py-1.5 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-50"
+      >
+        {label === "Download" ? "Download album" : label}
+      </button>
+      <TrialButton
+        trial={trial}
+        className="whitespace-nowrap rounded bg-surface-hover px-4 py-1.5 text-sm font-semibold text-text hover:bg-border disabled:opacity-50"
+      />
+    </div>
   );
 }
 
@@ -189,7 +223,10 @@ export function DeemixPage() {
     if (result.type === "artist") {
       setStack((s) => [...s, { kind: "artist", id: result.deemix_id, name: result.title }]);
     } else if (result.type === "album") {
-      setStack((s) => [...s, { kind: "album", id: result.deemix_id, title: result.title, artist: result.artist }]);
+      setStack((s) => [
+        ...s,
+        { kind: "album", id: result.deemix_id, title: result.title, artist: result.artist, cover: result.cover_url },
+      ]);
     }
   };
   const goBack = () => setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
@@ -299,6 +336,7 @@ export function DeemixPage() {
                 albumId={view.id}
                 title={view.title}
                 artist={view.artist}
+                cover={view.cover}
                 quality={quality}
                 mountpoint={mountpoint}
               />

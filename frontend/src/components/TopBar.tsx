@@ -21,7 +21,7 @@ export function TopBar() {
   const isDeemix = location.pathname.startsWith("/deemix");
   const isLibrary = location.pathname.startsWith("/library");
   const placeholder = isDeemix
-    ? "Search Deemix for tracks, albums, playlists..."
+    ? "Search Deemix for tracks, albums, artists..."
     : isLibrary
       ? "Filter tracks, albums, artists..."
       : "Search";

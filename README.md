@@ -12,18 +12,14 @@ into your library.
 
 ## Features
 
-- **Library browsing** — tracks, artists, albums, playlists, and album art in a dark, Spotify-like UI.
-- **Library management** — add/upload tracks, delete tracks, create/delete playlists, add/remove
-  playlist tracks.
+- **Library browsing** — tracks, artists, albums, and album art in a dark, Spotify-like UI.
+- **Library management** — add/upload tracks and delete tracks.
 - **Deemix integration** — search Deezer for tracks/albums/artists, drill into an artist's albums
   and an album's songs, and download at configurable quality (FLAC / MP3 320 / MP3 128).
 - **Automatic pipeline** — downloads land in your Music Directory, FLAC is converted to ALAC, and
   files are copied onto the iPod via `gpod-cp`. Staged downloads are removed once they're on the device.
-- **Spotify playlists** — paste a public Spotify playlist link to track it. Podify reads the playlist
-  (no Spotify account or API key needed), matches each song on Deezer by artist and title, and
-  downloads the new ones through the deemix pipeline onto the iPod. Each tracked playlist is also
-  reproduced as a real playlist on the device, holding the same songs in the same order. Playlists can
-  re-check themselves in the background, and only tracks that aren't already on the device are downloaded.
+- **Discover** — album suggestions built from what's on your iPod, weighted by play counts. Add an
+  album permanently, or on a timed trial that removes it from the device unless you keep it.
 - **Auto-sync** — optionally scan the Music Directory and import new FLAC files when an iPod connects.
 
 ## Architecture
@@ -35,7 +31,7 @@ React (Vite/TS) frontend  ──►  Flask API (app.py)
                                  ├─ flac2alac_converter  FLAC → ALAC
                                  ├─ auto_sync.py         Music Directory → iPod
                                  ├─ deemix_routes.py     /api/deemix/* (deemix_service.py)
-                                 └─ spotify_routes.py    /api/spotify/* (spotify_service.py)
+                                 └─ discover_routes.py   /api/discover/* (discover_service.py)
 ```
 
 In production the frontend is built (`frontend/dist`) and served as static files by Flask.
@@ -67,40 +63,39 @@ Downloading requires a Deezer ARL token. Add it in **Settings → Deezer ARL Tok
 server-side only (in `data/deemix_config.json`, which is gitignored) and never exposed back to the
 frontend beyond a "configured" flag. **Never commit it.**
 
-### Spotify playlist tracking
+### Discover
 
-Spotify does not allow downloading, so Podify uses Spotify only to *read* a playlist and then
-sources the audio from Deezer via deemix. The only requirement is the **Deezer ARL token** (above) —
-that is what actually downloads the music. **No Spotify account, app or API key is needed.**
+**Discover → For you** suggests albums based on the iPod's library. Your artists are weighted by
+how often you play them. Podify then walks Deezer's related-artist graph outward from them and uses
+genre charts as wildcards. Suggestions need no ARL; downloading them does. Each card explains why
+it was suggested.
 
-Playlists are read from Spotify's public web pages, which serve any public playlist without
-authentication. The main playlist page is the primary source because it reflects edits immediately;
-the embed page is a fallback, since its copy of a playlist can lag hours behind a song being added.
-Two things follow from that:
+The **Personalisation** dial sets how far from your library the suggestions go. All the way to
+*Familiar* means albums you don't own yet by artists you already have. Further right moves to similar
+artists, then artists two steps out, then genre charts. Releasing the dial re-rolls the batch, and
+**New suggestions** re-rolls at the current setting.
 
-- These are unofficial endpoints, so they can change without notice.
-- Only the first page of a very long playlist is readable without a login. Podify says so in the
-  sync message rather than silently syncing part of it.
+Every suggestion can be added two ways:
 
-The official Web API is deliberately not used: it needs per-user credentials, refuses apps that lack
-Web API access with a bare `403 Forbidden`, and still cannot read Spotify's own editorial playlists.
+- **Add** — copies the album onto the iPod permanently.
+- **Try *N*d** — copies it on a trial (7 days by default). When the time is up the album is
+  deleted from the iPod silently, unless you pressed **Keep**. Listening to it doesn't change the
+  timer. If the iPod is unplugged when a trial ends, it's removed the next time the iPod is
+  connected. **+7d** extends a trial by hand. A trial downloaded at a lower quality can be kept
+  and re-downloaded in FLAC in one step.
 
-Every sync also reconciles a playlist of the same name on the iPod: songs added on Spotify are
-appended, songs removed from it are taken out of the device playlist (the tracks themselves stay in
-the library), and renaming the playlist on Spotify renames the mirror. Removing a tracked playlist in
-Podify leaves its iPod playlist in place — delete that from **Library → Playlists** if you want it gone.
+Trials aren't limited to suggestions. The **Deemix** page has a **Try *N*d** button next to
+**Download** for every album and song, at the quality picked there. Those trials show up under
+**Discover → On trial** like any other. Artists can only be downloaded permanently.
 
-Then open **Spotify → Playlists**, paste a playlist link (`https://open.spotify.com/playlist/...`,
-a `spotify:playlist:` URI, or a bare playlist id) and click **Track playlist**. Each card shows how
-many of its tracks are already on the iPod, and **Sync now** downloads the rest. Tracks with no
-Deezer match are flagged and retried on later syncs. **Reset** forgets a playlist's sync history so
-the next sync re-downloads everything.
+A trial only removes the tracks it put on the device. Podify reads the library before and after the
+download and records the new tracks that carry the album's tags. Before deleting, it checks that
+each path still holds that title and album, so other music on the device is never touched.
 
-Only public playlists are readable.
-
-With **Settings → Spotify → check tracked playlists in the background** enabled, playlists marked
-*Auto-sync* are re-checked on the configured interval and new tracks are downloaded automatically,
-using the last mountpoint that was synced from the UI.
+**×** hides a suggestion for good, and **Never suggest** blocks an artist (undo that in
+**Preferences**). Expired trials count as a mild "not for me" in later batches. Preferences also hold
+the trial length and quality, the maximum number of trials at once, the batch size, whether EPs
+are included, and an optional weekly refresh.
 
 ## Frontend development
 
@@ -169,8 +164,8 @@ npm run build      # outputs to frontend/dist
 | `HOST_IP` / `HOST_PORT` | Published bind address / port | `0.0.0.0` / `8080` |
 | `APP_PORT` | Container port | `8080` |
 | `DEEMIX_DOWNLOAD_SUBDIR` | Subfolder in `/music` for deemix downloads | `deemix` |
-| `SPOTIFY_CONFIG_PATH` | Spotify auto-sync config | `.spotify_config.json` |
-| `SPOTIFY_PLAYLISTS_PATH` | Tracked playlists and their sync state | `.spotify_playlists.json` |
+| `DISCOVER_STATE_PATH` | Discover preferences, suggestions and trial records | `.discover_state.json` |
+| `DISCOVER_CACHE_PATH` | Cached Deezer lookups for suggestions | `.discover_cache.json` |
 | `GUNICORN_THREADS` | Worker threads (single worker — see note) | `8` |
 
 > The app runs as a **single gunicorn worker** because deemix job state is held in-process;

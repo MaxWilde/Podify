@@ -11,25 +11,21 @@ from werkzeug.utils import secure_filename
 from album_art import CoverArtError, load_cover
 from auto_sync import run_auto_sync_if_enabled
 from deemix_routes import deemix_bp
+from discover_routes import discover_bp
 from ipod_service import (
     GpodError,
     add_tracks,
-    add_tracks_to_playlist,
-    create_playlist,
-    delete_playlist,
     delete_tracks,
     load_library,
-    remove_tracks_from_playlist,
     resolve_ipod_root,
 )
 from settings_service import load_settings
 from settings_service import save_settings
-from spotify_routes import spotify_bp
 
 
 app = Flask(__name__)
 app.register_blueprint(deemix_bp)
-app.register_blueprint(spotify_bp)
+app.register_blueprint(discover_bp)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024  # 2GB
 
 if os.environ.get("DEBUG", "").strip().lower() in {"1", "true", "yes"}:
@@ -239,102 +235,6 @@ def add_uploaded_tracks() -> tuple[object, int] | object:
             "conversion_failed_count": conversion_failed_count,
             "skipped_count": skipped_count,
             "message": f"{phase_message}{skipped_suffix}",
-        }
-    )
-
-
-@app.route("/api/playlists/create", methods=["POST"])
-def create_playlist_route() -> tuple[object, int] | object:
-    payload = request.get_json(silent=True) or {}
-    mountpoint = str(payload.get("mountpoint", "")).strip()
-    playlist_name = str(payload.get("playlist_name", "")).strip()
-    if not mountpoint:
-        return jsonify({"error": "Field 'mountpoint' is required."}), 400
-    if not playlist_name:
-        return jsonify({"error": "Field 'playlist_name' is required."}), 400
-
-    try:
-        create_playlist(mountpoint, playlist_name)
-    except GpodError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except Exception:
-        return jsonify({"error": "Unexpected server error."}), 500
-
-    return jsonify({"message": f'Playlist "{playlist_name}" created.'})
-
-
-@app.route("/api/playlists/delete", methods=["POST"])
-def delete_playlist_route() -> tuple[object, int] | object:
-    payload = request.get_json(silent=True) or {}
-    mountpoint = str(payload.get("mountpoint", "")).strip()
-    playlist_name = str(payload.get("playlist_name", "")).strip()
-    if not mountpoint:
-        return jsonify({"error": "Field 'mountpoint' is required."}), 400
-    if not playlist_name:
-        return jsonify({"error": "Field 'playlist_name' is required."}), 400
-
-    try:
-        delete_playlist(mountpoint, playlist_name)
-    except GpodError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except Exception:
-        return jsonify({"error": "Unexpected server error."}), 500
-
-    return jsonify({"message": f'Playlist "{playlist_name}" deleted.'})
-
-
-@app.route("/api/playlists/add-tracks", methods=["POST"])
-def add_tracks_to_playlist_route() -> tuple[object, int] | object:
-    payload = request.get_json(silent=True) or {}
-    mountpoint = str(payload.get("mountpoint", "")).strip()
-    playlist_name = str(payload.get("playlist_name", "")).strip()
-    track_ids = payload.get("track_ids", [])
-    if not mountpoint:
-        return jsonify({"error": "Field 'mountpoint' is required."}), 400
-    if not playlist_name:
-        return jsonify({"error": "Field 'playlist_name' is required."}), 400
-    if not isinstance(track_ids, list):
-        return jsonify({"error": "Field 'track_ids' must be a list."}), 400
-
-    try:
-        result = add_tracks_to_playlist(mountpoint, playlist_name, track_ids)
-    except GpodError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except Exception:
-        return jsonify({"error": "Unexpected server error."}), 500
-
-    return jsonify(
-        {
-            "added_count": result["requested_count"],
-            "message": f'Added {result["requested_count"]} track(s) to "{playlist_name}".',
-        }
-    )
-
-
-@app.route("/api/playlists/remove-tracks", methods=["POST"])
-def remove_tracks_from_playlist_route() -> tuple[object, int] | object:
-    payload = request.get_json(silent=True) or {}
-    mountpoint = str(payload.get("mountpoint", "")).strip()
-    playlist_name = str(payload.get("playlist_name", "")).strip()
-    track_ids = payload.get("track_ids", [])
-    if not mountpoint:
-        return jsonify({"error": "Field 'mountpoint' is required."}), 400
-    if not playlist_name:
-        return jsonify({"error": "Field 'playlist_name' is required."}), 400
-    if not isinstance(track_ids, list):
-        return jsonify({"error": "Field 'track_ids' must be a list."}), 400
-
-    try:
-        result = remove_tracks_from_playlist(mountpoint, playlist_name, track_ids)
-    except GpodError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except Exception:
-        return jsonify({"error": "Unexpected server error."}), 500
-
-    return jsonify(
-        {
-            "removed_count": result["requested_count"],
-            "message": f'Removed {result["requested_count"]} track(s) from "{playlist_name}".',
         }
     )
 
